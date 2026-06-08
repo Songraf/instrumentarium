@@ -781,40 +781,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if p.path == "/open-folder":
-            import subprocess as _sp, subprocess
             folder = os.path.abspath(OUTPUT_BASE)
             log.info("/open-folder: %s", folder)
             if platform.system() == "Windows":
-                _sp.Popen(["explorer", folder], creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.Popen(["explorer", folder], creationflags=subprocess.CREATE_NO_WINDOW)
             elif platform.system() == "Darwin":
-                _sp.Popen(["open", folder])
+                subprocess.Popen(["open", folder])
             else:
-                _sp.Popen(["xdg-open", folder])
+                subprocess.Popen(["xdg-open", folder])
             self._json({"ok": True})
             return
 
         if p.path == "/open-log":
-            import subprocess as _sp, subprocess
             log_path = os.path.join(_BASE_DIR, "instrumentarium.log")
             log.info("/open-log: base_dir=%s log_path=%s exists=%s", _BASE_DIR, log_path, os.path.isfile(log_path))
             if platform.system() == "Darwin":
-                _sp.Popen(["open", log_path])
+                subprocess.Popen(["open", log_path])
             elif platform.system() == "Windows":
-                _sp.Popen(["explorer", "/select,", log_path], creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.Popen(["explorer", "/select,", log_path], creationflags=subprocess.CREATE_NO_WINDOW)
             else:
-                _sp.Popen(["xdg-open", log_path])
+                subprocess.Popen(["xdg-open", log_path])
             self._json({"ok": True})
             return
 
         if p.path == "/open-python-download":
-            import subprocess as _sp, subprocess
             log.info("/open-python-download")
             if platform.system() == "Darwin":
-                _sp.Popen(["open", "https://www.python.org/downloads/macos/"])
+                subprocess.Popen(["open", "https://www.python.org/downloads/macos/"])
             elif platform.system() == "Windows":
-                _sp.Popen(["cmd", "/c", "start", "https://www.python.org/downloads/windows/"], creationflags=subprocess.CREATE_NO_WINDOW)
+                subprocess.Popen(["cmd", "/c", "start", "https://www.python.org/downloads/windows/"], creationflags=subprocess.CREATE_NO_WINDOW)
             else:
-                _sp.Popen(["xdg-open", "https://www.python.org/downloads/"])
+                subprocess.Popen(["xdg-open", "https://www.python.org/downloads/"])
             self._json({"ok": True})
             return
 
@@ -1022,11 +1019,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not yt:
                 self._json({"error": "yt-dlp not found"})
                 return
-            import tempfile, os as _os, time as _time
+            import tempfile
             tmpdir = tempfile.mkdtemp(prefix="instr_probe_")
             try:
-                tmpl = _os.path.join(tmpdir, "probe.%(ext)s")
-                # Download for ~5 seconds then kill to estimate full size.
+                tmpl = os.path.join(tmpdir, "probe.%(ext)s")
+                # Download for ~15 seconds then kill to estimate full size.
                 # Works with merged formats (e.g. "137+140") where --download-sections fails.
                 cmd = [yt, "-f", format_id if format_id else "best",
                        "-o", tmpl, "--no-playlist", "--no-check-certificates",
@@ -1036,7 +1033,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 cmd.append(url)
                 log.info("/probe-meta: cmd=%s", " ".join(cmd))
                 proc = _popen(cmd)
-                probe_duration = 8  # seconds to download before killing
+                probe_duration = 15  # seconds to download before killing
                 try:
                     stdout_data, _ = proc.communicate(timeout=probe_duration)
                 except subprocess.TimeoutExpired:
@@ -1045,22 +1042,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         proc.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         pass
-                    except Exception:
-                        pass
                 except Exception as e:
                     proc.kill()
                     self._json({"filesize": None, "probe_duration": probe_duration, "error": str(e)})
                     return
-                probe_files = [f for f in _os.listdir(tmpdir) if not f.startswith(".")]
+                probe_files = [f for f in os.listdir(tmpdir) if not f.startswith(".")]
                 total_size = 0
                 if probe_files:
                     for f in probe_files:
-                        total_size += _os.path.getsize(_os.path.join(tmpdir, f))
+                        total_size += os.path.getsize(os.path.join(tmpdir, f))
                 self._json({"filesize": total_size if total_size > 0 else None, "probe_duration": probe_duration})
                 log.info("/probe-meta: size=%d for format=%s", total_size, format_id)
             finally:
                 import shutil
-                shutil.rmtree(tmpdir, errors="ignore")
+                shutil.rmtree(tmpdir, ignore_errors=True)
             return
 
         self.send_error(404)

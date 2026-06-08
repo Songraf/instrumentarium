@@ -639,21 +639,28 @@ function renderResButtons() {
     btn.className = 'res-btn';
     const rawLabel = best.display_label || (best.height + 'p');
     const resLabel = (rawLabel && rawLabel !== "0" && rawLabel !== "0p") ? rawLabel : "Скачать видео";
-    btn.innerHTML = `<span class="res-label">${resLabel}</span><span class="res-meta">~ · ${best.ext.toUpperCase()}</span>`;
+    // Show filesize from /probe immediately; use probe-meta only to refine estimate
+    const probeSizeStr = (best.filesize && best.filesize > 0) ? _human(best.filesize) : '~';
+    btn.innerHTML = `<span class="res-label">${resLabel}</span><span class="res-meta">${probeSizeStr} · ${best.ext.toUpperCase()}</span>`;
     btn.onclick = () => {
       try { startDownload(best.format_id, best.height); }
       catch(e) { alert('startDownload error: ' + e.message); }
     };
     container.appendChild(btn);
 
-    // Probe for real file size — runs async AFTER button is in DOM
+    // Probe for real file size only when /probe didn't provide one
     if (!currentUrl) {
       if (window._dbg) window._dbg.textContent += '\nSKIP probe: currentUrl is empty';
-      return;
+      continue;
+    }
+    if (best.filesize && best.filesize > 0) {
+      // Already have a good estimate from /probe — skip probe-meta
+      continue;
     }
     const probeUrl = window.location.origin + '/probe-meta?url=' + encodeURIComponent(currentUrl) + '&format_id=' + encodeURIComponent(best.format_id);
     var xhr = new XMLHttpRequest();
     xhr.open('GET', probeUrl, true);
+    xhr.timeout = 20000; // 20s client-side timeout
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
       if (xhr.status !== 200) {
@@ -663,7 +670,7 @@ function renderResButtons() {
       try {
         var meta = JSON.parse(xhr.responseText);
         var fs = meta.filesize;
-        var dur = meta.probe_duration || 8;
+        var dur = meta.probe_duration || 15;
         var estStr = '~';
         if (fs && fs > 0 && currentDuration && currentDuration > dur) {
           estStr = '~' + _human(Math.round(fs * (currentDuration / dur)));
@@ -675,6 +682,9 @@ function renderResButtons() {
       } catch(e) {
         if (window._dbg) window._dbg.textContent += '\nXHR parse error: ' + e.message + ' body=' + xhr.responseText.substring(0,100);
       }
+    };
+    xhr.ontimeout = function() {
+      if (window._dbg) window._dbg.textContent += '\nXHR timeout';
     };
     xhr.send();
   }
