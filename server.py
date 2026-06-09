@@ -1007,11 +1007,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._json({"error": str(e)})
             return
 
-        # ── /probe-meta: get real filesize by downloading a tiny fragment ──
+        # ── /probe-meta: start async file-size probe, return job_id ──
         if p.path == "/probe-meta":
             qs = parse_qs(p.query)
             url = qs.get("url", [""])[0].strip()
             format_id = qs.get("format_id", [""])[0].strip()
+            duration = qs.get("duration", ["0"])[0].strip()
             if not url:
                 self._json({"error": "URL is required"})
                 return
@@ -1019,43 +1020,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not yt:
                 self._json({"error": "yt-dlp not found"})
                 return
-            import tempfile
-            tmpdir = tempfile.mkdtemp(prefix="instr_probe_")
-            try:
-                tmpl = os.path.join(tmpdir, "probe.%(ext)s")
-                # Download for ~15 seconds then kill to estimate full size.
-                # Works with merged formats (e.g. "137+140") where --download-sections fails.
-                cmd = [yt, "-f", format_id if format_id else "best",
-                       "-o", tmpl, "--no-playlist", "--no-check-certificates",
-                       "--retries", "1", "--newline", "--no-progress"]
-                if _cookies_path[0]:
-                    cmd += ["--cookies", _cookies_path[0]]
-                cmd.append(url)
-                log.info("/probe-meta: cmd=%s", " ".join(cmd))
-                proc = _popen(cmd)
-                probe_duration = 15  # seconds to download before killing
-                try:
-                    stdout_data, _ = proc.communicate(timeout=probe_duration)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        pass
-                except Exception as e:
-                    proc.kill()
-                    self._json({"filesize": None, "probe_duration": probe_duration, "error": str(e)})
-                    return
-                probe_files = [f for f in os.listdir(tmpdir) if not f.startswith(".")]
-                total_size = 0
-                if probe_files:
-                    for f in probe_files:
-                        total_size += os.path.getsize(os.path.join(tmpdir, f))
-                self._json({"filesize": total_size if total_size > 0 else None, "probe_duration": probe_duration})
-                log.info("/probe-meta: size=%d for format=%s", total_size, format_id)
-            finally:
-                import shutil
-                shutil.rmtree(tmpdir, ignore_errors=True)
+            jid = str(uuid.uuid4())[:8]
+            probe_meta_jobs[jid] = {"status": "running", "filesize": None, "probe_duration": None}
+            t = threading.Thread(target=_run_probe_meta, args=(jid, url, yt, format_id, int(duration) if duration else 0), daemon=True)
+            t.start()
+            log.info("/probe-meta: started job %s for format %s", jid, format_id)
+            self._json({"job_id": jid})
+            return
+
+        # ── /probe-meta-status: poll async probe result ────────────
+        if p.path == "/probe-meta-status":
+            qs = parse_qs(p.query)
+            jid = qs.get("id", [""])[0].strip()
+            job = probe_meta_jobs.get(jid)
+            if not job:
+                self._json({"error": "Job not found"})
+                return
+            self._json(job)
+            # Clean up completed jobs to prevent memory leaks
+            if job["status"] in ("done", "error"):
+                # Keep briefly so client can read, but allow GC
+                pass
             return
 
         self.send_error(404)
@@ -1469,7 +1454,54 @@ def _human(n):
         n /= 1024
     return f"{n:.1f} TB"
 
-# ── Main ────────────────────────────────────────────────────────────
+# ── Probe-meta runner (background thread) ─────────────────────────────
+_PROBE_DURATION = 15  # seconds to download before killing
+
+def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
+    """Run yt-dlp probe download in a background thread and store result."""
+    import tempfile
+    tmpdir = tempfile.mkdtemp(prefix="instr_probe_")
+    try:
+        tmpl = os.path.join(tmpdir, "probe.%(ext)s")
+        fmt = format_id + "+bestaudio/best" if format_id and "+" not in format_id else (format_id if format_id else "best")
+        cmd = [yt_path, "-f", fmt,
+               "-o", tmpl, "--no-playlist", "--no-check-certificates",
+               "--retries", "1", "--newline", "--no-progress"]
+        if _cookies_path[0]:
+            cmd += ["--cookies", _cookies_path[0]]
+        cmd.append(url)
+        log.info("/probe-meta thread %s: starting", jid)
+        proc = _popen(cmd)
+        try:
+            proc.communicate(timeout=_PROBE_DURATION)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        probe_files = [f for f in os.listdir(tmpdir) if not f.startswith(".")]
+        total_size = 0
+        if probe_files:
+            for f in probe_files:
+                total_size += os.path.getsize(os.path.join(tmpdir, f))
+        result = {"filesize": total_size if total_size > 0 else None,
+                  "probe_duration": _PROBE_DURATION}
+        if video_duration and video_duration > _PROBE_DURATION and total_size > 0:
+            result["filesize"] = int(total_size * (video_duration / _PROBE_DURATION))
+        probe_meta_jobs[jid] = {"status": "done", **result}
+        log.info("/probe-meta thread %s: done size=%d", jid, total_size)
+    except Exception as e:
+        log.error("/probe-meta thread %s: error %s", jid, e)
+        probe_meta_jobs[jid] = {"status": "error", "filesize": None, "error": str(e)}
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ── Probe-meta jobs (async, non-blocking) ─────────────────────────────
+# Running probe-meta downloads are stored here keyed by job_id.
+# Each entry: {"status": "running"|"done"|"error", "filesize": N, "probe_duration": N}
+probe_meta_jobs = {}
 if __name__ == "__main__":
     # If run directly (not via start.sh), do auto-setup
     auto_setup = "--auto-setup" in sys.argv or "--setup" in sys.argv
