@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Tests for server.py functions (isolated, no network, no yt-dlp)."""
 import os, sys, tempfile, json
 from unittest.mock import patch, MagicMock
@@ -153,16 +154,18 @@ def test_check_ytdlp_found_in_bin(mock_check, mock_isfile):
     from server import check_ytdlp
     mock_isfile.return_value = True
     mock_check.return_value = "2026.01.01"
-    ok, ver = check_ytdlp()
+    ok, ver = check_ytdlp(["/fake/bin"])
     assert ok is True
     assert ver == "2026.01.01"
 
 
+@patch("server.shutil.which")
 @patch("server.os.path.isfile")
-def test_check_ytdlp_not_found(mock_isfile):
+def test_check_ytdlp_not_found(mock_isfile, mock_which):
     from server import check_ytdlp
     mock_isfile.return_value = False
-    ok, ver = check_ytdlp()
+    mock_which.return_value = None
+    ok, ver = check_ytdlp(["/fake/bin"])
     assert ok is False
     assert ver is None
 
@@ -173,17 +176,17 @@ def test_status_endpoint_json():
     from server import setup_state
     import json
     # Simulate a state
-    setup_state["phase"] = "done"
-    setup_state["progress"] = 100
+    setup_state.setup_phase = "done"
+    setup_state.setup_progress = 100
     as_json = json.dumps({
-        "phase": setup_state["phase"],
-        "progress": setup_state["progress"],
-        "messages": setup_state["messages"],
-        "python_ok": setup_state["python_ok"],
-        "ytdlp_ok": setup_state["ytdlp_ok"],
-        "server_started": setup_state["server_started"],
-        "error": setup_state["error"],
-        "setup_done": setup_state["setup_done"],
+        "phase": setup_state.setup_phase,
+        "progress": setup_state.setup_progress,
+        "messages": setup_state.setup_messages,
+        "python_ok": setup_state.python_ok,
+        "ytdlp_ok": setup_state.ytdlp_ok,
+        "server_started": setup_state.server_started,
+        "error": setup_state.setup_error,
+        "setup_done": setup_state.server_started,
     })
     data = json.loads(as_json)
     assert data["phase"] == "done"
@@ -214,6 +217,111 @@ def test_map_ytdlp_error():
     # Edge cases
     assert _map_ytdlp_error("") == "Не удалось обработать ссылку — проверьте правильность или используйте cookies"
     assert _map_ytdlp_error(None) == "Не удалось обработать ссылку — проверьте правильность или используйте cookies"
+
+
+# ── NEW: AppState tests ──────────────────────────────────────────────
+
+def test_app_state_cookies_path():
+    from server.state import AppState
+    s = AppState()
+    assert s.cookies_path is None
+    s.cookies_path = "/tmp/cookies.txt"
+    assert s.cookies_path == "/tmp/cookies.txt"
+
+
+def test_app_state_active_proc():
+    from server.state import AppState
+    s = AppState()
+    assert s.active_proc is None
+    # Can't easily test kill_active_proc without a real subprocess,
+    # but we can verify it returns False when no process is running
+    assert s.kill_active_proc() is False
+
+
+def test_app_state_reset_setup():
+    from server.state import AppState
+    s = AppState()
+    s.setup_phase = "done"
+    s.setup_progress = 100
+    s.python_ok = True
+    s.ytdlp_ok = True
+    s.server_started = True
+    s.reset_setup()
+    assert s.setup_phase == "idle"
+    assert s.setup_progress == 0
+    assert s.python_ok is False
+    assert s.ytdlp_ok is False
+    assert s.server_started is False
+
+
+def test_app_state_add_message():
+    from server.state import AppState
+    s = AppState()
+    s.add_message("test message", "info")
+    assert len(s.setup_messages) == 1
+    assert s.setup_messages[0]["text"] == "test message"
+    assert s.setup_messages[0]["type"] == "info"
+
+
+def test_app_state_get_setup_response():
+    from server.state import AppState
+    s = AppState()
+    s.setup_phase = "done"
+    s.setup_progress = 100
+    resp = s.get_setup_response(setup_done_marker_exists=True)
+    assert resp["phase"] == "done"
+    assert resp["progress"] == 100
+    assert resp["setup_done"] is True
+    assert "messages" in resp
+    assert "python_ok" in resp
+    assert "ytdlp_ok" in resp
+
+
+# ── NEW: parse_speed tests ───────────────────────────────────────────
+
+def test_parse_speed_mib():
+    from server.utils import parse_speed
+    assert parse_speed("1.23MiB/s") == 1.23 * 1024 * 1024
+
+
+def test_parse_speed_kib():
+    from server.utils import parse_speed
+    assert parse_speed("500.00KiB/s") == 500.0 * 1024
+
+
+def test_parse_speed_b():
+    from server.utils import parse_speed
+    assert parse_speed("100B/s") == 100.0
+
+
+def test_parse_speed_fallback():
+    from server.utils import parse_speed
+    assert parse_speed("1.5") == 1.5
+
+
+def test_parse_speed_empty():
+    from server.utils import parse_speed
+    assert parse_speed("") == 0
+
+
+# ── NEW: human_size tests (alias) ────────────────────────────────────
+
+def test_human_size_alias():
+    from server import human_size, _human
+    assert human_size is _human
+    assert human_size(1024 * 1024) == "1.0 MB"
+
+
+# ── NEW: error mapping edge cases ────────────────────────────────────
+
+def test_map_ytdlp_error_all_caps():
+    from server import map_ytdlp_error
+    assert map_ytdlp_error("UNSUPPORTED URL") == "Неправильная ссылка или сайт не поддерживается"
+
+
+def test_map_ytdlp_error_mixed_case():
+    from server import map_ytdlp_error
+    assert map_ytdlp_error("Private Video") == "Видео приватное — нужны cookies для доступа"
 
 
 # ── Run all ──────────────────────────────────────────────────────────

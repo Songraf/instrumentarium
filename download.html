@@ -515,8 +515,9 @@ let mode = 'video';
 let probedFormats = [];
 let probedAudioFormats = [];
 let probedTitle = '';
-let probeAbort = null;
+let probeXhr = null;
 let currentUrl = '';
+let currentDuration = 0;
 
 /* ── Mode toggle ─────────────────────────────────────────── */
 function setMode(m) {
@@ -528,10 +529,11 @@ function setMode(m) {
 
 /* ── Probe URL ───────────────────────────────────────────── */
 let probeTimer = null;
+let probeXhr = null;
 
 function scheduleProbe(url) {
   clearTimeout(probeTimer);
-  if (probeAbort) { probeAbort.abort(); probeAbort = null; }
+  if (probeXhr) { probeXhr.abort(); probeXhr = null; }
   hideProbing();
   hideResButtons();
   probedFormats = [];
@@ -541,12 +543,20 @@ function scheduleProbe(url) {
 function doProbe(url) {
   if (!isValidUrl(url)) return;
   showProbing();
-  probeAbort = new AbortController();
-  fetch('/probe?url=' + encodeURIComponent(url), { signal: probeAbort.signal })
-    .then(r => r.json())
-    .then(data => {
-      hideProbing();
-      probeAbort = null;
+  probeXhr = new XMLHttpRequest();
+  probeXhr.open('GET', '/probe?url=' + encodeURIComponent(url), true);
+  probeXhr.timeout = 35000;
+  probeXhr.onreadystatechange = function() {
+    if (probeXhr.readyState !== 4) return;
+    hideProbing();
+    probeXhr = null;
+    if (probeXhr.status !== 200 && probeXhr.status !== 0) {
+      showError('Ошибка', 'Не удалось проверить ссылку (HTTP ' + probeXhr.status + ')');
+      return;
+    }
+    if (probeXhr.status === 0) return; // aborted
+    try {
+      var data = JSON.parse(probeXhr.responseText);
       if (data.error) {
         showError(data.error, null);
         return;
@@ -566,35 +576,45 @@ function doProbe(url) {
       document.getElementById('videoTitle').classList.add('visible');
       document.getElementById('modeRow').classList.remove('hidden');
       renderResButtons();
-    })
-    .catch(err => {
-      hideProbing();
-      probeAbort = null;
-      if (err.name !== 'AbortError') {
-        showError('Ошибка', 'Не удалось проверить ссылку: ' + err.message);
-      }
-    });
+    } catch(e) {
+      showError('Ошибка', 'Не удалось обработать ответ сервера');
+    }
+  };
+  probeXhr.ontimeout = function() {
+    hideProbing();
+    probeXhr = null;
+    showError('Ошибка', 'Таймаут проверки ссылки (30с)');
+  };
+  probeXhr.send();
 }
 
 function showProbing() { document.getElementById('probing').classList.add('visible'); }
 function hideProbing() { document.getElementById('probing').classList.remove('visible'); }
 
-/* ── Probe-meta polling (async) ─────────────────────────────── */
+/* ── Probe-meta polling (async, exponential backoff) ──────────── */
 function _pollProbeMeta(jobId, btn, best) {
   var attempts = 0;
-  var maxAttempts = 12; // 12 * 1.5s = 18s max wait
-  var timer = setInterval(function() {
+  var maxAttempts = 10;
+  // Exponential backoff: 1s, 2s, 4s, 8s... up to 16s
+  function getInterval(attempt) {
+    return Math.min(1000 * Math.pow(2, attempt), 16000);
+  }
+  function poll() {
     attempts++;
+    if (attempts > maxAttempts) return;
     var xhr = new XMLHttpRequest();
     xhr.open('GET', window.location.origin + '/probe-meta-status?id=' + encodeURIComponent(jobId), true);
     xhr.timeout = 5000;
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
-      if (xhr.status !== 200) return;
+      if (xhr.status !== 200) {
+        // Retry on error with backoff
+        setTimeout(poll, getInterval(attempts));
+        return;
+      }
       try {
         var job = JSON.parse(xhr.responseText);
         if (job.status === 'done') {
-          clearInterval(timer);
           var fs = job.filesize;
           var el = btn.querySelector('.res-meta');
           if (el) {
@@ -602,14 +622,22 @@ function _pollProbeMeta(jobId, btn, best) {
             el.textContent = (fs && fs > 0) ? _human(fs) + ' · ' + ext : '~ · ' + ext;
           }
         } else if (job.status === 'error') {
-          clearInterval(timer);
+          // Stop polling on error
+        } else {
+          // Still running — poll again with backoff
+          setTimeout(poll, getInterval(attempts));
         }
-      } catch(e) {}
+      } catch(e) {
+        setTimeout(poll, getInterval(attempts));
+      }
     };
-    xhr.ontimeout = function() { clearInterval(timer); };
+    xhr.ontimeout = function() {
+      setTimeout(poll, getInterval(attempts));
+    };
     xhr.send();
-    if (attempts >= maxAttempts) clearInterval(timer);
-  }, 1500);
+  }
+  // Start first poll after 1 second
+  setTimeout(poll, 1000);
 }
 
 /* ── Render resolution buttons ───────────────────────────── */
@@ -989,9 +1017,14 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             else { document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки'; }
             enableDlButtons();
           } else {
-            const bar = document.getElementById('dlBar');
-            const cur = parseFloat(bar.style.width);
-            if (cur < 92) bar.style.width = (cur + Math.random() * 6) + '%';
+            // Parse real progress from yt-dlp output
+            for (const l of d.lines) {
+              const pctMatch = l.match(/^\s*(\d+\.?\d*)%/);
+              if (pctMatch) {
+                const pct = Math.min(parseFloat(pctMatch[1]), 99);
+                bar.style.width = pct + '%';
+              }
+            }
           }
         }).catch(() => {});
     }, 1500);

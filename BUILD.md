@@ -35,6 +35,7 @@
 - pywebview (нативное окно с HTML/CSS/JS UI)
 - cefpython3 (Chromium Embedded Framework — fallback для Windows без WebView2)
 - PyInstaller (сборка в standalone-бинарь)
+- pytest (57 тестов)
 
 ---
 
@@ -43,8 +44,15 @@
 ```
 instrumentarium/
 ├── app.py                      # Точка входа: лаунчер, сервер, окно
-├── server.py                   # Backend: setup wizard, HTTP API, yt-dlp
+├── server_main.py              # HTTP server + handler
 ├── download.html               # UI: setup wizard + загрузчик (тёмная тема, русский)
+├── server/                     # Подпакет с бизнес-логикой
+│   ├── __init__.py             # Реэкспорт всех публичных API
+│   ├── state.py                # AppState — thread-safe контейнер состояния
+│   ├── utils.py                # Утилиты (detect_platform, human_size, popen, etc.)
+│   ├── errors.py               # Маппинг ошибок yt-dlp → русские сообщения
+│   ├── setup.py                # Setup wizard (Python, yt-dlp, ffmpeg)
+│   └── download.py             # JobLogger + probe-meta (async)
 ├── start.sh                    # Быстрый запуск (Linux/macOS/WSL)
 ├── start.bat                   # Быстрый запуск (Windows)
 ├── assets/
@@ -53,17 +61,17 @@ instrumentarium/
 │   ├── icon.ico                # Иконка 256×256 для Windows (сгенерирована, в git)
 │   └── icon_build.py           # Утилита SVG → .ico/.png (не нужна в CI)
 ├── tests/
-│   └── test_server.py          # 22 теста (pytest)
+│   ├── test_server.py          # Unit-тесты (36 тестов)
+│   └── test_integration.py     # Интеграционные тесты (21 тест)
 ├── video-downloader.spec       # PyInstaller spec (Linux/macOS)
-├── video-downloader-win.spec   # PyInstaller spec (Windows)
+├── video-downloader-win.spec   # PyInstaller spec (Windows, v1.2.0)
 ├── pytest.ini                  # Конфиг pytest
 ├── .github/workflows/build.yml # CI/CD
 ├── .gitignore                  # CONTEXT.md игнорируется
 ├── BUILD.md                    # Этот файл
 ├── SPEC.md                     # Техническая спецификация
 ├── USER_GUIDE.md               # Руководство пользователя
-├── README.md                   # Описание проекта для GitHub
-└── downloads/                  # ← Создаётся автоматически (папка платформ)
+└── README.md                   # Описание проекта для GitHub
 ```
 
 ### Файлы, генерируемые при работе (все в папке с .exe):
@@ -114,12 +122,12 @@ app.py (main thread)
   │       Если lock не взят → выход (уже запущен)
   │
   ├── 5. Запуск server_thread (daemon):
-  │       ├── import server
+  │       ├── import server_main
   │       ├── os.chdir(_BASE_DIR)
   │       ├── Проверка .setup_done:
-  │       │   Есть → phase="silent_check", _ensure_deps() в фоне
-  │       │   Нет  → run_setup() в фоне (показать wizard)
-  │       └── HTTP server на 0.0.0.0:18765 (timeout=0.5s)
+  │       │   Есть → phase="silent_check", _ensure_deps() in bg thread
+  │       │   Нет  → run_setup() in bg thread (показать wizard)
+  │       └── ThreadingHTTPServer на 0.0.0.0:18765 (timeout=0.5s)
   │
   ├── 6. Ожидание готовности сервера (max 5s, polling 127.0.0.1:18765)
   │
@@ -131,62 +139,49 @@ app.py (main thread)
           При закрытии → HTTP POST /shutdown → kill subprocess → stop server (без sleep, мгновенный exit)
 ```
 
-### 3.2. Backend: server.py
+### 3.2. Backend: server_main.py + server/ подпакет
 
 ```
-server.py (импортируется как модуль из app.py)
+server_main.py (импортируется как модуль из app.py)
   │
   ├── Конфигурация:
   │     PORT = 18765
   │     _BASE_DIR = вычисляется так же как в app.py
   │     SETUP_MARKER = _BASE_DIR/.setup_done
-  │     OUTPUT_BASE  = _BASE_DIR/downloads
+  │     OUTPUT_BASE  = ~/Downloads (системная папка)
   │     _BIN_CANDIDATES = [_BASE_DIR/.bin, _EXE_DIR/.bin, _MEIPASS/.bin]
   │     YT_DLP = _BIN_CANDIDATES[0]/yt-dlp.exe
   │
-  ├── setup_state (глобальный dict, shared между потоками):
-  │     phase: idle | checking | silent_check | installing_python |
-  │             installing_ytdlp | installing_ffmpeg | done | error
-  │     progress: 0-100
-  │     messages: [{text, type, time}]
+  ├── state (singleton из server/state.py):
+  │     setup_phase: idle | checking | silent_check | installing_python |
+  │                   installing_ytdlp | installing_ffmpeg | done | error
+  │     setup_progress: 0-100
+  │     setup_messages: [{text, type, time}]
   │     python_ok, ytdlp_ok, server_started, error
+  │     cookies_path: str | None
+  │     active_proc: subprocess.Popen | None
+  │     output_base: str | None
+  │     bin_candidates: list | None
   │
-  ├── _active_proc = [None] — текущий запущенный yt-dlp subprocess
-  │     (list-based mutable global, для kill при shutdown)
+  ├── Rate limiters:
+  │     _probe_limiter: token bucket (max_tokens=3, refill_rate=0.5/s)
+  │     _download_limiter: token bucket (max_tokens=2, refill_rate=0.2/s)
   │
-  ├── HTTP Handler:
-  │     GET  /              → download.html
-  │     GET  /status        → JSON setup_state
-  │     GET  /probe?url=    → JSON {title, formats, audio_formats}
-  │     GET  /log?job=&offset= → JSON {lines, status}
-  │     GET  /open-folder   → открыть папку downloads в файловом менеджере
+  ├── HTTP Handler (Handler):
+  │     GET  /              → download.html (с path traversal protection)
+  │     GET  /status        → JSON state.get_setup_response()
+  │     GET  /probe         → JSON {title, formats, audio_formats} (rate limited)
+  │     GET  /probe-meta    → JSON {job_id} (async, rate limited)
+  │     GET  /probe-meta-status → JSON {status, filesize}
+  │     GET  /log           → JSON {lines, status}
+  │     GET  /open-folder   → открыть папку downloads
+  │     GET  /cancel        → kill active download
   │     POST /setup         → запустить setup wizard
-  │     POST /download      → запустить скачивание
+  │     POST /download      → запустить скачивание (rate limited)
+  │     POST /cookies       → сохранить/очистить cookies (с валидацией)
   │     POST /shutdown      → kill subprocess + stop server
   │
-  ├── Setup flow:
-  │     run_setup() — полный wizard (первый запуск):
-  │       1. find_system_python()
-  │       2. check_ytdlp() / install_ytdlp()
-  │       3. install_ffmpeg() (best-effort)
-  │       4. _write_marker()
-  │
-  │     _ensure_deps() — тихая проверка (повторный запуск):
-  │       1. find_system_python()
-  │       2. check_ytdlp() / install_ytdlp()
-  │       3. install_ffmpeg() (best-effort)
-  │       4. _write_marker()
-  │
-  ├── Probe flow (/probe):
-  │     yt-dlp --dump-single-json → parse formats:
-  │       - is_video: (vcodec != "none" and vcodec is not None) or
-  │                   (video_ext != "none" and video_ext is not None)
-  │       - eff_height: width for vertical, height for horizontal
-  │       - display_label: format_note → eff_height → format_id → "Скачать видео"
-  │       - Дедупликация по стандартным бакетам
-  │       - audio_formats: дедупликация по битрейту
-  │
-  └── Download flow (JobLogger):
+  └── JobLogger (threading.Thread, daemon):
         - Video: format_id+bestaudio/best → --merge-output-format mp4
         - Audio: bestaudio[ext=m4a]/bestaudio → --extract-audio → mp3
         - Если ffmpeg: --recode-video mp4, --embed-metadata, --embed-thumbnail
@@ -202,28 +197,34 @@ Main Thread (app.py)
   └── pywebview event loop (блокирует main thread)
 
 Server Thread (daemon, app.py → _start_server_in_thread)
-  └── http.server.HTTPServer.serve_forever(timeout=0.5)
+  └── ThreadingHTTPServer.serve_forever(timeout=0.5)
         └── Handler.do_GET/do_POST (вызывается из HTTP-потока сервера)
 
-Setup Thread (daemon, server.py → run_setup или _ensure_deps)
+Setup Thread (daemon, server/setup.py → run_setup или _ensure_deps)
   └── Проверка/установка Python, yt-dlp, ffmpeg
 
-Download Thread (daemon, server.py → JobLogger)
+Download Thread (daemon, server/download.py → JobLogger)
   └── subprocess.Popen(yt-dlp) → proc.communicate() → parse stdout
+
+ProbeMeta Thread (daemon, server/download.py → _run_probe_meta)
+  └── subprocess.Popen(yt-dlp probe) → download fragment → estimate filesize
+
+Cleanup Thread (daemon, server_main.py → _cleanup_worker)
+  └── Каждые 5 минут: cleanup_old_jobs(max_age_seconds=3600)
 ```
 
 **Важно:**
 - Server thread — daemon, при завершении main thread убивается
-- При закрытии окна pywebview → `_on_closing()` → HTTP POST /shutdown → kill subprocess → server.stop
+- При закрытии окна pywebview → `_on_closing()` → HTTP POST /shutdown → kill subprocess → server.stop → daemon threads die
 - `os.chdir(_BASE_DIR)` выполняется в server thread — это меняет CWD для всего процесса
-- `_active_proc = [None]` — list-based mutable global для отслеживания активного subprocess
+- `state.active_proc` — thread-safe через `threading.Lock`
 
 ---
 
 ## 5. HTTP API
 
 ### GET / или /index.html
-Отдаёт `download.html` (ищет в _BIN_CANDIDATES, затем _MEIPASS, затем SCRIPT_DIR).
+Отдаёт `download.html` (ищет в _BIN_CANDIDATES, затем _MEIPASS, затем SCRIPT_DIR). Path traversal protection через `os.path.realpath()`.
 
 ### GET /status
 ```json
@@ -246,22 +247,27 @@ Download Thread (daemon, server.py → JobLogger)
   "duration": 123,
   "thumbnail": "https://...",
   "formats": [
-    {"format_id": "137", "height": 1080, "display_label": "1080p", "filesize": 52428800, "ext": "mp4"},
-    {"format_id": "136", "height": 720, "display_label": "720p", "filesize": 20971520, "ext": "mp4"}
+    {"format_id": "137", "height": 1080, "display_label": "1080p", "filesize": 52428800, "ext": "mp4"}
   ],
   "audio_formats": [
-    {"format_id": "140", "abr": 129.5, "filesize": 5242880, "ext": "m4a"},
-    {"format_id": "251", "abr": 126.6, "filesize": 4194304, "ext": "webm"}
+    {"format_id": "140", "abr": 129.5, "filesize": 5242880, "ext": "m4a"}
   ]
 }
 ```
 
+### GET /probe-meta?url=URL&format_id=ID&duration=N
+```json
+{"job_id": "abc12345"}
+```
+
+### GET /probe-meta-status?id=ID
+```json
+{"status": "running|done|error", "filesize": 12345, "probe_duration": 15}
+```
+
 ### GET /log?job=JOB_ID&offset=N
 ```json
-{
-  "lines": ["[yt-dlp] ...", "[download] ..."],
-  "status": "running|done|error"
-}
+{"lines": ["[yt-dlp] ...", "[download] ..."], "status": "running|done|error"}
 ```
 
 ### GET /open-folder
@@ -270,13 +276,16 @@ Download Thread (daemon, server.py → JobLogger)
 - macOS: `open <path>`
 - Linux: `xdg-open <path>`
 
+### GET /cancel
+Убивает активный yt-dlp subprocess, помечает все running jobs как cancelled.
+
 ### POST /setup
 Запускает setup wizard. Если уже настроено — возвращает `{"already_done": true}`.
 
 ### POST /download
 ```json
 // Request body:
-{"url": "https://youtube.com/watch?v=...", "mode": "video|audio", "format_id": "137"}
+{"url": "https://youtube.com/watch?v=...", "mode": "video|audio", "format_id": "137", "acodec": "aac"}
 
 // Response (success):
 {"job_id": "abc12345", "platform": "youtube"}
@@ -288,9 +297,19 @@ Download Thread (daemon, server.py → JobLogger)
 {"error": "..."}
 ```
 
+### POST /cookies
+```json
+// Save:
+{"content": "base64 encoded cookies.txt"} → {"ok": true, "path": "/path/to/.cookies.txt"}
+
+// Clear:
+{} → {"ok": true, "path": null}
+```
+
+Валидация: проверка формата Netscape cookie file, ограничение размера 1MB.
+
 ### POST /shutdown
 Убивает активный yt-dlp subprocess (если есть), останавливает HTTP сервер.
-Вызывается из app.py при закрытии окна.
 
 ---
 
@@ -324,7 +343,7 @@ Download Thread (daemon, server.py → JobLogger)
   - `ffprobe.exe` — скачивается автоматически (Windows, BtbN builds)
 
 ### 6.5. Папка `downloads/`
-- **Расположение:** `_BASE_DIR/downloads/`
+- **Расположение:** `~/Downloads` (системная папка)
 - **Подпапки:** `youtube/`, `twitter/`, `tiktok/`, `instagram/`, `facebook/`, `linkedin/`, `other/`
 - **Формат файлов:** `%(title).120s [%(id)s].%(ext)s` (ограничение 120 символов)
 
@@ -334,12 +353,8 @@ Download Thread (daemon, server.py → JobLogger)
 - **Формат:** Netscape HTTP Cookie File
 - **Управление:** через диалог 🍪 Cookies в UI (drag & drop, вставка текста, очистка)
 - **Использование:** yt-dlp `--cookies .cookies.txt` при каждом запросе
+- **Валидация:** проверка формата, ограничение размера 1MB
 - **В .gitignore**: да, не коммитится
-
-### 6.7. Папка `downloads/`
-- **Расположение:** `_BASE_DIR/downloads/`
-- **Подпапки:** `youtube/`, `twitter/`, `tiktok/`, `instagram/`, `facebook/`, `linkedin/`, `other/`
-- **Формат файлов:** `%(title).120s [%(id)s].%(ext)s` (ограничение 120 символов)
 
 ---
 
@@ -368,8 +383,7 @@ eff_height = width if is_vertical else height  # 1080, а не 1920
 | 1 | `format_note` существует и не содержит "DASH" | `format_note` (например "1080p") |
 | 2 | `eff_height > 0` | `"{eff_height}p"` (например "720p") |
 | 3 | `format_id` существует | `format_id.upper()` (например "SD", "HD" для Facebook) |
-| 4 | `video_ext` существует | `"Скачать видео"` |
-| 5 | Иначе | `"Скачать видео"` |
+| 4 | Иначе | `"Скачать видео"` |
 
 ### 7.4. Форматы скачивания
 
@@ -378,7 +392,7 @@ eff_height = width if is_vertical else height  # 1080, а не 1920
   format_id+bestaudio/best → --merge-output-format mp4
 
 Видео (авто, с ffmpeg):
-  bestvideo+bestaudio/best → --merge-output-format mp4 --recode-video mp4
+  bestvideo+bestaudio/best → --merge-output-format mp4 --postprocessor-args ffmpeg:-c:a aac -b:a 128k
 
 Видео (авто, без ffmpeg):
   best[ext=mp4]/best
@@ -391,7 +405,7 @@ eff_height = width if is_vertical else height  # 1080, а не 1920
 
 **Видео:** группировка по стандартным бакетам (144, 240, 360, 480, 720, 1080, 1440, 2160, 4320).
 
-**Аудио:** группировка по битрейту (шаг 16kbps), сортировка по убыванию.
+**Аудио:** группировка по битрейту (шаг 16kbps), сортировка по убыванию, максимум 3 формата.
 
 ### 7.6. Особенности платформ
 
@@ -413,8 +427,9 @@ eff_height = width if is_vertical else height  # 1080, а не 1920
 **Windows:** `video-downloader-win.spec`
 - `console=False` (без консоли)
 - `--onefile` (всё в один .exe)
-- Включает: `app.py`, `server.py`, `download.html`, webview, cefpython3
+- Включает: `app.py`, `server_main.py`, `download.html`, `server/` подпакет, webview
 - Иконка: `assets/icon.ico`
+- Версия: `1.2.0`
 
 **Linux/macOS:** `video-downloader.spec`
 - Аналогично, но без cefpython3
@@ -425,9 +440,9 @@ eff_height = width if is_vertical else height  # 1080, а не 1920
 1. **`sys._MEIPASS`** — путь к временной папке, куда PyInstaller извлекает файлы
 2. **`sys.executable`** — путь к .exe → `_BASE_DIR = dirname(sys.executable)`
 3. **НИКОГДА** не использовать `subprocess.Popen([sys.executable, ...])` — fork bomb!
-4. **Сервер запускается in-process** через `import server` + `threading.Thread`
+4. **Сервер запускается in-process** через `import server_main` + `threading.Thread`
 5. **`os.chdir(_BASE_DIR)`** — критически важна
-6. **`CREATE_NO_WINDOW`** для всех subprocess calls на Windows
+6. **`CREATE_NO_WINDOW`** для всех subprocess на Windows
 7. **`sys.stdout = sys.stderr = open(os.devnull, 'w')`** — до любого импорта
 
 ### 8.3. Команды сборки
@@ -448,7 +463,7 @@ pyinstaller video-downloader.spec --clean
 
 **Триггеры:**
 - `push` в `main`
-- Тег `v*` (например, `v1.0.0`)
+- Тег `v*` (например, `v1.2.0`)
 - Ручной запуск (`workflow_dispatch`)
 
 **Пайплайн:**
@@ -480,120 +495,75 @@ release (только при теге v*)
 python -m pytest tests/ -v
 ```
 
-**Файл:** `tests/test_server.py` — 22 теста
+**57 тестов:**
 
-**Что тестируется:**
+### Unit-тесты (tests/test_server.py, 36 тестов)
 - `detect_platform()` — 10 тестов (YouTube, Twitter, TikTok, Instagram, Facebook, LinkedIn, other, case-insensitive, empty URL, subdomains)
-- `_human()` — 5 тестов (bytes, KB, MB, GB, TB)
+- `human_size()` — 5 тестов (bytes, KB, MB, GB, TB)
 - `find_system_python()` — 3 теста (found, not found, too old)
 - `get_python_install_url()` — 2 теста (Windows 64-bit, Linux)
 - `check_ytdlp()` — 2 теста (found in bin, not found)
 - `/status` endpoint — 1 тест (JSON response)
+- `_map_ytdlp_error()` — 13 тестов (все типы ошибок, edge cases)
+- `AppState` — 6 тестов (cookies_path, active_proc, reset_setup, add_message, get_setup_response, thread safety)
+- `parse_speed()` — 5 тестов (MiB/s, KiB/s, B/s, fallback, empty)
 
-**Принцип:** Тесты изолированы через mock, не зависят от сети и файловой системы.
+### Интеграционные тесты (tests/test_integration.py, 21 тест)
+- HTTP endpoints: /status, /probe, /probe-meta, /probe-meta-status, /download, /cancel, /cookies, /log, /setup
+- CORS headers
+- Rate limiting
+- Path traversal protection
+- Thread safety (concurrent add_message, concurrent get/set)
 
 ---
 
 ## 11. Известные ограничения и планы
 
-### ✅ Решено
+### ✅ Решено (2026-06-09)
 - Нативное окно приложения (pywebview + CEF fallback)
-- Портативность: всё в одной папке с .exe
-- Setup wizard не появляется при повторном запуске
+- Портативность: всё в одной папке с .exe (не AppData)
+- Setup wizard не появляется при повторном запуске (.setup_done)
 - Закрытие без зависания (daemon thread + /shutdown endpoint)
 - Zombie process: /shutdown убивает активный yt-dlp subprocess
-- Glow animation: progress-bar получает класс .done при завершении
+- Glow animation: progress-bar получает класс .done (зелёный, без shimmer)
 - Кнопка 📁 Загрузки открывает папку с файловым менеджере
-- FFmpeg auto-install (Windows, BtbN builds) + fallback без ffmpeg
-- Нет консольных окон на Windows
+- FFmpeg auto-install (Windows, BtbN builds)
+- Нет консольных окон на Windows (CREATE_NO_WINDOW, devnull stdout)
 - CI/CD для всех трёх платформ
-- 22 теста, все проходят
-- Single instance lock
-- Автоматическая установка yt-dlp и Python
-- LinkedIn: поддержка vcodec=None, video_ext=mp4
-- Аудио дорожка: +bestaudio/best для всех видео форматов
-- Аудио UI: битрейт (слева) + размер (справа) на кнопках
-- Фиксированный размер окна 620×720 (resizable=False)
-- Фиксированная позиция кнопки "Загрузки" (min-height: 120px на dl-options)
-- Вертикальные видео (Shorts): корректное отображение разрешения через eff_height
-- /probe endpoint: динамические кнопки форматов на основе yt-dlp
-- Компактный UI: уменьшены отступы и размеры для помещения в экран
-- display_label: корректные названия кнопок для всех платформ (DASH, SD/HD, разрешение)
-- Ограничение длины имени файла: 120 символы для совместимости с Windows
-- **Cookies система**: drag & drop / вставка cookies.txt через диалог 🍪, LinkedIn авторизация
-- **?-тултипы**: CSS hover не работает в pywebview → JS `onmouseenter`/`onmouseleave`
-- **Визуальный фидбек кнопок**: `transform: scale(.96)` при `:active`, блокировка кнопки во время запроса
-- **Автозакрытие** cookies dialog после успешного сохранения (1.2с)
+- 57 тестов, все проходят
+- Lock-файл (один инстанс)
+- LinkedIn видео: поддержка vcodec=None, video_ext=mp4
+- Аудио дорожка: +bestaudio/best в формате скачивания
+- Аудио UI: битрейт + размер на кнопках
+- Фиксированный размер окна (620×720, resizable=False)
+- Фиксированная позиция кнопки "Загрузки" (min-height на dl-options)
+- Вертикальные видео (Shorts): корректное отображение разрешения
+- Cookies система: drag & drop / вставка cookies.txt, LinkedIn авторизация
+- ?-тултипы: JS onmouseenter/onmouseleave (CSS hover не работает в pywebview)
+- Визуальный фидбек кнопок: scale(.96) при :active, блокировка во время запроса
+- Маппинг ошибок yt-dlp: `_map_ytdlp_error()` — Unsupported URL, private video, 404, geo-blocked, rate-limited, network errors → понятные сообщения на русском
+- Оптимизация Windows-сборки: удалён CEF (~100+ MB меньше), убраны sleep(0.5) при shutdown → быстрый запуск и закрытие
+- CI артефакты: переименованы в linux/windows/macos-instrumentarium
+- **Размеры файлов на кнопках** — показываются сразу из /probe
+- **Асинхронный probe-meta** — не блокирует сервер
+- **ThreadingHTTPServer** — многопоточный HTTP-сервер
+- **Rate limiting** — защита от злоупотреблений
+- **CORS headers** — совместимость с разными origin
+- **Path traversal protection** — безопасность
+- **Thread-safe AppState** — потокобезопасность
+- **TTL cleanup** — автоматическая очистка старых jobs
+- **XMLHttpRequest** — вместо fetch для совместимости с pywebview
+- **Экспоненциальный бэк-офф** — probe-meta polling: 1s, 2s, 4s, 8s... до 16s
+- **Реальный прогресс-бар** — парсинг процента из yt-dlp output
+- **Отмена загрузки** — /cancel endpoint
+- **Валидация cookies** — проверка формата и размера
+- **Интеграционные тесты** — 21 тест для HTTP endpoints
+- **Рефакторинг** — разделение на server/ подпакет
 
-### ⬜ Планы
-- Расширить тесты: HTTP-эндпоинты, setup wizard, JobLogger
+### ⬜ Планы/в работе
+- Расширить тесты: HTTP-эндпоинты, JobLogger
 - Tauri-рефакторинг (долгосрочно)
 
 ---
 
-## Критические архитектурные паттерны
-
-### PyInstaller one-file mode
-```
-Запуск .exe
-  → PyInstaller извлекает всё во временную папку _MEIxxxxx
-  → sys._MEIPASS = путь к _MEIPASS
-  → sys.executable = путь к .exe
-  → _BASE_DIR = dirname(sys.executable) = папка с .exe
-  → os.chdir(_BASE_DIR) — переключаем CWD
-  → Все относительные пути теперь указывают на папку с .exe
-```
-
-### Активный subprocess tracking
-```python
-_active_proc = [None]  # list-based mutable global
-
-# В JobLogger.run():
-_active_proc[0] = proc        # при запуске yt-dlp
-# ... proc.communicate() ...
-_active_proc[0] = None        # в finally блоке
-
-# В Handler.do_POST /shutdown:
-proc = _active_proc[0]
-if proc and proc.poll() is None:
-    proc.kill()
-    proc.wait(timeout=5)
-_active_proc[0] = None
-```
-
-### Платформа определяется по URL
-```
-youtube.com, youtu.be     → youtube
-twitter.com, x.com        → twitter
-tiktok.com                → tiktok
-instagram.com             → instagram
-facebook.com, fb.com      → facebook
-linkedin.com              → linkedin
-иначе                     → other
-```
-
-### Окно приложения
-```
-Размер: 620×720 пикселей
-Resizable: False (пользователь не может менять размер)
-Скролл: Контент скроллится если не помещается (overflow-y: auto)
-Рендерер: edgechromium → cef → auto-detect (Windows)
-          GTK/Qt (Linux), Cocoa (macOS)
-```
-
-### UI компактность
-```
-Card padding: 24px (было 40px)
-Header: 1.2rem (было 1.4rem)
-Subtitle margin-bottom: 16px (было 28px)
-Setup icon: 2.5rem (было 3.5rem)
-URL input padding: 10px 14px (было 12px 16px)
-Mode toggle padding: 10px (было 14px)
-dl-options min-height: 120px (было 170px)
-res-btn padding: 12px 16px (было 14px 20px)
-big-downloads-btn margin-top: 12px (было 20px)
-```
-
----
-
-*Последнее обновление: 2026-05-30*
+*Последнее обновление: 2026-06-09*

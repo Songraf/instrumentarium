@@ -240,7 +240,7 @@ def _run_app():
     def _start_server_in_thread() -> None:
         log.info("=== Server thread starting ===")
         try:
-            import server as srv
+            import server_main as srv
             srv.SCRIPT_DIR = _BASE_DIR
             srv._BASE_DIR = _BASE_DIR
             srv.SETUP_MARKER = os.path.join(_BASE_DIR, ".setup_done")
@@ -249,15 +249,16 @@ def _run_app():
             srv.YT_DLP_DIR = _bin_dir
             srv.YT_DLP = os.path.join(_bin_dir, "yt-dlp.exe" if sys.platform == "win32" else "yt-dlp")
             srv._BIN_CANDIDATES = [_bin_dir]
+            srv.state.output_base = srv.OUTPUT_BASE
+            srv.state.bin_candidates = srv._BIN_CANDIDATES
 
             marker_exists = os.path.exists(srv.SETUP_MARKER)
             if marker_exists:
-                srv.setup_state["phase"] = "silent_check"
-                srv.setup_state["setup_done"] = True
-                t = threading.Thread(target=srv._ensure_deps, daemon=True)
+                srv.state.setup_phase = "silent_check"
+                t = threading.Thread(target=srv._ensure_deps_wrapper, daemon=True)
                 t.start()
             else:
-                t = threading.Thread(target=srv.run_setup, daemon=True)
+                t = threading.Thread(target=srv._run_setup_wrapper, daemon=True)
                 t.start()
 
             srv.srv = srv.http.server.HTTPServer(("0.0.0.0", srv.PORT), srv.Handler)
@@ -285,15 +286,14 @@ def _run_app():
 
     def _do_cleanup():
         try:
-            import server as srv
+            import server_main as srv
             if hasattr(srv, 'srv') and srv.srv:
                 srv.srv.shutdown()
         except Exception:
             pass
         try:
-            import server as srv
-            if srv._active_proc[0] and srv._active_proc[0].poll() is None:
-                srv._active_proc[0].kill()
+            import server_main as srv
+            srv.state.kill_active_proc()
         except Exception:
             pass
         _cleanup_lock()

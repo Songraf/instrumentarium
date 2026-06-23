@@ -1,7 +1,7 @@
 # INSTRUMENTARIUM — Техническое описание и спецификация
 
-*Версия документа: 2026-06-01*
-*Статус: Активная разработка (MVP)*
+*Версия документа: 2026-06-09*
+*Статус: Активная разработка (v1.2.0)*
 
 ---
 
@@ -60,13 +60,13 @@
 | DW-03 | Бейдж платформы | Цветной индикатор: 🔴 YouTube, 🐦 Twitter/X, 🎵 TikTok, 📸 Instagram, 📘 Facebook, 💼 LinkedIn, 🌐 Другое |
 | DW-04 | Пробинг форматов | Запрос `/probe` → получение доступных разрешений и аудиоформатов |
 | DW-05 | Кнопки разрешений | Динамические кнопки на основе данных yt-dlp (1080p, 720p и т.д.) |
-| DW-06 | Размер файла | Отображение размера файла на каждой кнопке |
+| DW-06 | Размер файла | Отображение размера файла на каждой кнопке (из /probe) |
 | DW-07 | Аудио дорожка | Все видео скачиваются с аудио (`+bestaudio/best`) |
 | DW-08 | Вертикальные видео | Корректное отображение разрешения для Shorts/Reels (eff_height = width) |
-| DW-09 | Прогресс загрузки | Прогресс-бар с shimmer → зелёный при завершении |
+| DW-09 | Прогресс загрузки | Прогресс-бар с реальным процентом из yt-dlp output |
 | DW-10 | Уведомление об ошибке | Toast с описанием ошибки + hint "Подробности в instrumentarium.log" |
 | DW-11 | Открытие папки | Кнопка "📁 Загрузки" → открытие папки downloads в файловом менеджере |
-| DW-12 | Организация файлов | Скачанные файлы сортируются по подпапкам: `downloads/<платформа>/` |
+| DW-12 | Отмена загрузки | Кнопка "⛔ Отмена" → `GET /cancel` → kill active subprocess |
 | DW-13 | Ограничение имени | Длина имени файла ограничена 120 символами для совместимости с Windows |
 
 ### 2.3. Скачивание аудио
@@ -86,6 +86,10 @@
 | SX-02 | Корректное закрытие | `/shutdown` → kill yt-dlp → stop server → daemon threads die |
 | SX-03 | Нет зомби | Активный subprocess отслеживается и убивается при закрытии |
 | SX-04 | Нет консоли | На Windows — `console=False`, `CREATE_NO_WINDOW`, stdout → devnull |
+| SX-05 | Rate limiting | Token bucket для /probe (3 req/s) и /download (0.2 req/s) |
+| SX-06 | CORS | Все JSON-ответы включают `Access-Control-Allow-Origin: *` |
+| SX-07 | Path traversal | Валидация путей в `_serve_html_file` через `os.path.realpath()` |
+| SX-08 | Cookies validation | Проверка формата Netscape cookie file, ограничение размера 1MB |
 
 ---
 
@@ -93,8 +97,8 @@
 
 ### 3.1. Системные требования
 
-| Компонент | Минимуме | Рекомендуемое |
-|-----------|----------|---------------|
+| Компонент | Минимум | Рекомендуемое |
+|-----------|---------|---------------|
 | ОС | Windows 10+, Linux (GTK/Qt), macOS 10.14+ | Последняя версия |
 | Python | 3.7+ | 3.12+ |
 | RAM | 256 MB | 512 MB |
@@ -108,10 +112,8 @@
 | Python | 3.7+ | Среда выполнения | Авто или системный |
 | yt-dlp | latest | Загрузка видео | Авто в `.bin/` |
 | ffmpeg | latest | Мердж видео+аудио, конвертация | Авто на Windows (BtbN) |
-|| pywebview | latest | Нативное окно | В билде |
-|| PyInstaller | latest | Сборка .exe | Только для сборки |
-
-> **Примечание:** CEF (cefpython3) удалён из Windows-билда (2026-06-01) для уменьшения размера (~100+ MB). Fallback — системный браузер через `webbrowser.open()`.
+| pywebview | latest | Нативное окно | В билде |
+| PyInstaller | latest | Сборка .exe | Только для сборки |
 
 ### 3.3. Портативность
 
@@ -124,6 +126,7 @@
 ├── instrumentarium.log      # Лог
 ├── .setup_done              # Маркёр настройки
 ├── .instrumentarium.lock    # Lock-файл
+├── .cookies.txt             # Cookies (опционально)
 └── .bin/
     ├── yt-dlp.exe
     ├── ffmpeg.exe
@@ -143,28 +146,48 @@
 ```
 Main Thread (app.py)
   └── pywebview event loop (блокирует main thread)
-        │
-        └── Server Thread (daemon)
-              ├── Setup Thread (daemon): run_setup() или _ensure_deps()
-              └── JobLogger Thread (daemon): subprocess yt-dlp → parse stdout
+
+Server Thread (daemon, ThreadingHTTPServer)
+  └── Обработка HTTP-запросов (многопоточная)
+
+Setup Thread (daemon)
+  └── Проверка/установка Python, yt-dlp, ffmpeg
+
+JobLogger Thread (daemon)
+  └── subprocess yt-dlp → parse stdout → download_jobs[jid]
+
+ProbeMeta Thread (daemon)
+  └── yt-dlp probe download → estimate filesize → probe_meta_jobs[jid]
+
+Cleanup Thread (daemon)
+  └── TTL cleanup каждые 5 минут
 ```
 
 ### 4.2. Компоненты
 
 | Файл | Назначение |
 |------|-----------|
-| `app.py` | Точка входа: lock, логирование, запуск сервера, окно pywebview |
-| `server.py` | Backend: setup wizard, HTTP API, yt-dlp, скачивание |
+| `app.py` | Десктоп-лаунчер: lock, логирование, запуск сервера in-process, окно pywebview |
+| `server_main.py` | HTTP server + handler: импортит из server/ подпакета |
+| `server/__init__.py` | Реэкспорт всех публичных API подпакета |
+| `server/state.py` | AppState — thread-safe контейнер состояния |
+| `server/utils.py` | Утилиты: detect_platform, human_size, popen_no_console, find_ffmpeg |
+| `server/errors.py` | Маппинг ошибок yt-dlp → русские сообщения |
+| `server/setup.py` | Setup wizard: проверка/установка Python, yt-dlp, ffmpeg |
+| `server/download.py` | JobLogger + probe-meta (async) |
 | `download.html` | UI: setup screen + download screen (HTML/CSS/JS) |
 
 ### 4.3. Ключевые решения
 
-- **Сервер in-process** через `import server` + `threading.Thread` (не subprocess — избегаем fork bomb)
-- **pywebview** для нативного окна (не вкладка браузера)
-- **yt-dlp** скачивается автоматически при первом запуске
-- **ffmpeg** скачивается автоматически на Windows (BtbN builds)
-- **Lock-файл** через `msvcrt.locking` (Win) / `fcntl.flock` (Unix)
-- **Active process tracking** через `_active_proc = [None]` (list-based mutable global)
+- **ThreadingHTTPServer** — многопоточный HTTP-сервер (не блокируется на медленных запросах)
+- **Rate limiting** — token bucket для /probe и /download
+- **CORS headers** — все JSON-ответы включают `Access-Control-Allow-Origin: *`
+- **Path traversal protection** — валидация путей через `os.path.realpath()`
+- **Thread-safe AppState** — все атрибуты защищены `threading.Lock`
+- **TTL cleanup** — автоматическая очистка старых jobs каждые 5 минут
+- **XMLHttpRequest** — вместо fetch для совместимости с pywebview
+- **Экспоненциальный бэк-офф** — probe-meta polling: 1s, 2s, 4s, 8s... до 16s
+- **Реальный прогресс-бар** — парсинг процента из yt-dlp output
 
 ---
 
@@ -177,12 +200,15 @@ Main Thread (app.py)
 | GET | `/`, `/index.html` | Отдаёт download.html |
 | GET | `/status` | JSON: setup_state |
 | GET | `/probe?url=URL` | JSON: {title, duration, thumbnail, formats, audio_formats} |
+| GET | `/probe-meta?url=URL&format_id=ID&duration=N` | JSON: {job_id} |
+| GET | `/probe-meta-status?id=ID` | JSON: {status, filesize, probe_duration} |
 | GET | `/log?job=ID&offset=N` | JSON: {lines, status} |
 | GET | `/open-folder` | Открывает папку downloads |
+| GET | `/cancel` | Отмена активной загрузки |
 | POST | `/setup` | Запускает setup wizard |
 | POST | `/download` | Запускает скачивание {url, mode, format_id} |
-|| POST | `/cookies` | Сохранить/очистить cookies. Body: `{content: base64}` или `{}` для очистки |
-|| POST | `/shutdown` | Kill subprocess + stop server |
+| POST | `/cookies` | Сохранить/очистить cookies |
+| POST | `/shutdown` | Kill subprocess + stop server |
 
 ### 5.2. Формат /probe response
 
@@ -202,28 +228,18 @@ Main Thread (app.py)
 }
 ```
 
-### 5.3. Логика display_label для кнопок
-
-| Приорититет | Условие | Label |
-|-------------|---------|-------|
-| 1 | `format_note` существует и не содержит "DASH" | `format_note` (например "1080p") |
-| 2 | `eff_height > 0` | `"{eff_height}p"` (например "720p") |
-| 3 | `format_id` существует | `format_id.upper()` (например "SD", "HD" для Facebook) |
-| 4 | `video_ext` существует | `"Скачать видео"` |
-| 5 | Иначе | `"Скачать видео"` |
-
-### 5.4. Форматы скачивания
+### 5.3. Форматы скачивания
 
 | Режим | Формат yt-dlp | Дополнительно |
 |-------|---------------|---------------|
 | Видео (кнопка) | `format_id+bestaudio/best` | `--merge-output-format mp4` |
-| Видео (авто, с ffmpeg) | `bestvideo+bestaudio/best` | `--merge-output-format mp4 --recode-video mp4` |
+| Видео (авто, с ffmpeg) | `bestvideo+bestaudio/best` | `--merge-output-format mp4 --postprocessor-args ffmpeg:-c:a aac -b:a 128k` |
 | Видео (авто, без ffmpeg) | `best[ext=mp4]/best` | — |
 | Аудио | `bestaudio[ext=m4a]/bestaudio` | `--extract-audio --audio-format mp3 --audio-quality 0` |
 
-### 5.5. Обработка ошибок yt-dlp
+### 5.4. Обработка ошибок yt-dlp
 
-Функция `_map_ytdlp_error()` (добавлена 2026-06-01) маппит stderr yt-dlp в понятные сообщения на русском:
+Функция `map_ytdlp_error()` маппит stderr yt-dlp в понятные сообщения на русском:
 
 | Ошибка yt-dlp | Сообщение пользователю |
 |---|---|
@@ -239,7 +255,7 @@ Main Thread (app.py)
 | `Removed/Deleted` | Видео было удалено |
 | `Copyright/DMCA` | Видео заблокировано по запросу правообладателя |
 | `Age restricted` | Видео с возрастным ограничением — нужны cookies |
-| Другое | Не удалось обработать ссылку — проверьте правильность или используйте cookies 👇🏻 |
+| Другое | Не удалось обработать ссылку — проверьте правильность или используйте cookies |
 
 ---
 
@@ -260,9 +276,9 @@ Main Thread (app.py)
 - Бейдж платформы
 - Переключатель 🎥 Видео / 🎵 Аудио
 - Динамические кнопки разрешений/аудио
-- Прогресс-бар загрузки
+- Прогресс-бар загрузки (реальный процент)
 - Toast для ошибок
-- Кнопка "📁 Загрузки"
+- Кнопки "📁 Загрузки" и "⛔ Отмена"
 
 ### 6.2. Размер окна
 
@@ -279,7 +295,7 @@ Main Thread (app.py)
 - Успех: `#4caf50`
 - Ошибка: `#ff4757`
 
-### 6.5. Cookies Dialog
+### 6.4. Cookies Dialog
 
 **Назначение**: загрузка cookies для доступа к приватному контенту (LinkedIn и др.)
 
@@ -293,10 +309,11 @@ Main Thread (app.py)
 - При сохранении: кнопка блокируется → «⏳ Сохраняю…» → «✅ Готово» → автозакрытие через 1.2с
 - При ошибке: разблокировка кнопки, красное сообщение об ошибке
 - Cookies сохраняются в `.cookies.txt` (_BASE_DIR), используются yt-dlp через `--cookies`
+- Валидация: проверка формата Netscape cookie file, ограничение размера 1MB
 
 **pywebview нюанс**: тултипы через JS `onmouseenter`/`onmouseleave` (CSS `:hover` не работает)
 
-### 6.6. Локализация
+### 6.5. Локализация
 
 Интерфейс полностью на русском языке.
 
@@ -331,7 +348,7 @@ Main Thread (app.py)
 
 **Видео:** Группировка по стандартным бакетам: 144, 240, 360, 480, 720, 1080, 1440, 2160, 4320.
 
-**Аудио:** Группировка по битрейту (шаг 16kbps), сортировка по убыванию.
+**Аудио:** Группировка по битрейту (шаг 16kbps), сортировка по убыванию, максимум 3 формата.
 
 ---
 
@@ -362,7 +379,7 @@ pyinstaller video-downloader.spec --clean
 **Триггеры:** push в main, тег v*, ручной запуск
 
 **Пайплайн:**
-1. **test** — pytest (22 теста)
+1. **test** — pytest (57 тестов)
 2. **build** — PyInstaller для Linux/Windows/macOS
 3. **release** — GitHub Release (только для тегов v*)
 
@@ -375,10 +392,10 @@ pyinstaller video-downloader.spec --clean
 
 1. `_BASE_DIR = dirname(sys.executable)` — папка с .exe
 2. **НИКОГДА** `subprocess.Popen([sys.executable, ...])` — fork bomb!
-3. Сервер in-process через `import server` + `threading.Thread`
+3. Сервер in-process через `import server_main` + `threading.Thread`
 4. `os.chdir(_BASE_DIR)` в server thread
 5. `CREATE_NO_WINDOW` для всех subprocess на Windows
-6. `sys.stdout = sys.stderr = devnull` до любого импорта
+6. `sys.stdout = sys.stderr = open(os.devnull, 'w')` до любого импорта
 
 ---
 
@@ -389,9 +406,9 @@ pyinstaller video-downloader.spec --clean
 | # | Ограничение | Описание |
 |---|-------------|----------|
 | L-01 | Без ffmpeg качество ограничено | Без ffmpeg нельзя мержить DASH-потоки. Shorts до ~360p |
-| L-02 | Нет выбора папки сохранения | Всегда `downloads/<платформа>/` |
+| L-02 | Нет выбора папки сохранения | Всегда `~/Downloads` |
 | L-03 | Нет очереди загрузок | Одна загрузка за раз |
-| L-04 | Нет паузы/отмены | Нельзя приостановить или отменить загрузку |
+| L-04 | Нет паузы/возобновления | Нельзя приостановить или возобновить загрузку |
 | L-05 | Нет прокси | Прокси не поддерживается |
 | L-06 | Нет выбора формата аудио | Только MP3 |
 
@@ -399,8 +416,10 @@ pyinstaller video-downloader.spec --clean
 
 | # | План | Приоритет |
 |---|------|-----------|
-| P-01 | Расширить тесты (HTTP-эндпоинты, JobLogger) | Средний |
-| P-02 | Tauri-рефакторинг | Низкий (долгосрочно) |
+| P-01 | Очередь загрузок | Средний |
+| P-02 | Выбор папки сохранения | Средний |
+| P-03 | Пауза/возобновление | Низкий |
+| P-04 | Tauri-рефакторинг | Низкий (долгосрочно) |
 
 ---
 
@@ -411,15 +430,24 @@ pyinstaller video-downloader.spec --clean
 ```
 instrumentarium/
 ├── app.py                      # Десктоп-лаунчер
-├── server.py                   # Backend
+├── server_main.py              # HTTP server + handler
 ├── download.html               # UI
+├── server/                     # Подпакет
+│   ├── __init__.py
+│   ├── state.py
+│   ├── utils.py
+│   ├── errors.py
+│   ├── setup.py
+│   └── download.py
 ├── start.sh / start.bat        # Быстрый запуск
 ├── assets/                     # Иконки
-├── tests/test_server.py        # 22 теста
+├── tests/                      # Тесты
+│   ├── test_server.py          # Unit-тесты (36)
+│   └── test_integration.py     # Интеграционные тесты (21)
 ├── video-downloader.spec       # PyInstaller spec (Linux/Mac)
 ├── video-downloader-win.spec   # PyInstaller spec (Windows)
 ├── .github/workflows/build.yml # CI/CD
-├── CONTEXT.md                  # Рабочий контекст
+├── CONTEXT.md                  # Рабочий контект
 ├── BUILD.md                    # Архитектурная документация
 ├── SPEC.md                     # Этот файл
 └── README.md                   # Описание для GitHub
@@ -440,4 +468,4 @@ instrumentarium/
 
 ---
 
-*Последнее обновление: 2026-06-01*
+*Последнее обновление: 2026-06-09*
