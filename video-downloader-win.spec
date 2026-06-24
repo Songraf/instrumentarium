@@ -48,7 +48,7 @@ exe = EXE(
     a.datas,
     [],
     name='Instrumentarium',
-    debug=False,
+    version='0.1.0',
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
