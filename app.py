@@ -338,7 +338,7 @@ def _run_app():
             os._exit(0)
         signal.signal(signal.SIGTERM, _sigterm_handler)
 
-        _renderers = ["edgechromium"] if sys.platform == "win32" else []
+        _renderers = ["cefpython3", "edgechromium"] if sys.platform == "win32" else []
         _started = False
         for _gui in _renderers:
             try:
