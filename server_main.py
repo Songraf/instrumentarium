@@ -182,19 +182,13 @@ if hasattr(sys, "_MEIPASS"):
 
 
 def _serve_html_file(handler):
-    """Serve the HTML UI — search multiple locations with path traversal protection."""
+    """Serve the HTML UI — search multiple locations."""
     html = None
     for path in _HTML_CANDIDATES:
-        # Path traversal protection: ensure the resolved path is within SCRIPT_DIR
-        real_path = os.path.realpath(path)
-        real_script = os.path.realpath(SCRIPT_DIR)
-        if not real_path.startswith(real_script):
-            log.warning("Path traversal attempt blocked: %s", path)
-            continue
         try:
-            with open(real_path, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 html = f.read()
-            log.info("Serving HTML from: %s", real_path)
+            log.info("Serving HTML from: %s", path)
             break
         except FileNotFoundError:
             continue
