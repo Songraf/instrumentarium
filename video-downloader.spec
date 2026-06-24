@@ -10,16 +10,18 @@ except Exception:
     webview_datas, webview_binaries, webview_hiddenimports = [], [], ['webview']
 
 a = Analysis(
-    ['app.py', 'server.py'],
+    ['app.py', 'server_main.py'],
     pathex=[],
     binaries=webview_binaries,
     datas=webview_datas + [
-        ('app.py', '.'),
-        ('server.py', '.'),
         ('download.html', '.'),
+        ('server/', 'server'),
         ('assets/*', 'assets'),
     ],
-    hiddenimports=webview_hiddenimports + ['bottle', 'proxy_tools'],
+    hiddenimports=webview_hiddenimports + [
+        'bottle', 'proxy_tools',
+        'server', 'server.state', 'server.utils', 'server.errors', 'server.setup', 'server.download',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

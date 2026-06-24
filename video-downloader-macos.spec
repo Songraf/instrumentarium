@@ -11,16 +11,20 @@ except Exception:
     webview_datas, webview_binaries, webview_hiddenimports = [], [], ['webview']
 
 a = Analysis(
-    ['app.py', 'server.py'],
+    ['app.py', 'server_main.py'],
     pathex=[],
     binaries=webview_binaries,
     datas=webview_datas + [
         ('download.html', '.'),
+        ('server/', 'server'),
         ('assets/Info.plist', 'Contents/Resources'),
         ('assets/entitlements.plist', 'Contents/Resources'),
         ('assets/icon.icns', 'Contents/Resources'),
     ],
-    hiddenimports=webview_hiddenimports + ['bottle', 'proxy_tools'],
+    hiddenimports=webview_hiddenimports + [
+        'bottle', 'proxy_tools',
+        'server', 'server.state', 'server.utils', 'server.errors', 'server.setup', 'server.download',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -41,6 +45,7 @@ exe = EXE(
     a.datas,
     [],
     name='Instrumentarium',
+    version='1.2.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

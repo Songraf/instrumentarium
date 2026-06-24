@@ -20,6 +20,7 @@ a = Analysis(
     ],
     hiddenimports=webview_hiddenimports + [
         'bottle', 'proxy_tools',
+        'server', 'server.state', 'server.utils', 'server.errors', 'server.setup', 'server.download',
     ],
     hookspath=[],
     hooksconfig={},
