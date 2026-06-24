@@ -280,7 +280,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if p.path == "/probe":
-            self._handle_probe()
+            try:
+                self._handle_probe()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
             return
 
         if p.path == "/probe-meta":
@@ -335,13 +338,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         log.debug("HTTP %s %s", self.command, self.path)
 
     def _json(self, data):
-        body = json.dumps(data).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self._cors_headers()
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self._cors_headers()
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _handle_probe(self):
         """Handle /probe endpoint with rate limiting."""
@@ -506,7 +512,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         probe_meta_jobs[jid] = {"status": "running", "filesize": None, "probe_duration": None}
         t = threading.Thread(
             target=_run_probe_meta,
-            args=(jid, url, yt, format_id, int(duration) if duration else 0),
+            args=(jid, url, yt, format_id, int(float(duration)) if duration else 0),
             daemon=True
         )
         t.start()
