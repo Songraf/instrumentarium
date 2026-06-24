@@ -19,6 +19,22 @@ import time
 import uuid
 from urllib.parse import urlparse, parse_qs
 
+from server import state, detect_platform, popen_no_console as _popen, has_ffmpeg, map_ytdlp_error
+
+# ── Debug log (minimal) ─────────────────────────────────────────
+_exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+_dbg_log = os.path.join(_exe_dir, "instrumentarium_debug.log")
+def _dbg(msg):
+    try:
+        with open(_dbg_log, "a") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
+_dbg("=== server_main.py started ===")
+_dbg(f"sys._MEIPASS: {getattr(sys, '_MEIPASS', 'N/A')}")
+_dbg(f"sys.executable: {sys.executable}")
+
 # ── Import everything from subpackage ──────────────────────────────────
 from server import (
     state,
@@ -101,6 +117,7 @@ if not globals().get("_BASE_DIR"):
     else:
         _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.makedirs(_BASE_DIR, exist_ok=True)
+_dbg(f"_BASE_DIR: {_BASE_DIR}")
 
 SETUP_MARKER = os.path.join(_BASE_DIR, ".setup_done")
 _LOCK_PATH = os.path.join(_BASE_DIR, ".instrumentarium.lock")
@@ -110,6 +127,7 @@ if hasattr(sys, "_MEIPASS"):
     SCRIPT_DIR = _EXE_DIR
 else:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_dbg(f"SCRIPT_DIR: {SCRIPT_DIR}")
 
 # Use system Downloads folder as output directory
 if platform.system() == "Windows":
@@ -184,13 +202,16 @@ if hasattr(sys, "_MEIPASS"):
 def _serve_html_file(handler):
     """Serve the HTML UI — search multiple locations."""
     html = None
+    _dbg(f"_serve_html_file called, candidates: {_HTML_CANDIDATES}")
     for path in _HTML_CANDIDATES:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 html = f.read()
+            _dbg(f"HTML served from: {path} ({len(html)} chars)")
             log.info("Serving HTML from: %s", path)
             break
         except FileNotFoundError:
+            _dbg(f"HTML not found: {path}")
             continue
     if html is None:
         html = "<h1>UI file not found</h1><p>Tried: " + ", ".join(_HTML_CANDIDATES) + "</p>"
@@ -349,10 +370,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         qs = parse_qs(urlparse(self.path).query)
-        url = qs.get("url", [""])[0].strip()
+        url = qs.get("url", [None])[0]
+        _dbg(f"/probe url={url}")
         if not url:
             self._json({"error": "URL is required"})
             return
+        url = url.strip()
 
         # Validate URL
         try:
@@ -644,6 +667,7 @@ def _cleanup_worker():
 # ── Main ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    _dbg("=== __main__ starting ===")
     auto_setup = "--auto-setup" in sys.argv or "--setup" in sys.argv
 
     if auto_setup:
@@ -658,6 +682,8 @@ if __name__ == "__main__":
     _safe_print(f"   URL: http://localhost:{PORT}")
     _safe_print(f"   Output: {OUTPUT_BASE}/")
     _safe_print()
+    _dbg("Starting server on port 18765")
+
 
     srv = http.server.ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
     try:

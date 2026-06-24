@@ -15,6 +15,16 @@ launches from the installed location.
 
 import os, sys, shutil, logging, subprocess
 
+# ── Debug log (minimal, only key events) ──────────────────────────
+_exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+_dbg_log = os.path.join(_exe_dir, "instrumentarium_debug.log")
+def _dbg(msg):
+    try:
+        with open(_dbg_log, "a") as f:
+            f.write(msg + "\n")
+    except Exception:
+        pass
+
 # ── Determine paths ──────────────────────────────────────────────
 # When running from PyInstaller one-file: _MEIPASS = temp extraction dir
 # When running installed: _MEIPASS does not exist
@@ -238,6 +248,7 @@ def _run_app():
             pass
 
     def _start_server_in_thread() -> None:
+        _dbg("=== Server thread starting ===")
         log.info("=== Server thread starting ===")
         try:
             import server_main as srv
@@ -277,11 +288,14 @@ def _run_app():
         try:
             sock = socket.create_connection(("127.0.0.1", 18765), timeout=0.1)
             sock.close()
+            _dbg("Server started OK on port 18765")
             break
-        except (ConnectionRefusedError, OSError):
+        except (ConnectionRefusedError, OSError) as e:
+            _dbg(f"Wait for server: {e}")
             time.sleep(0.1)
 
     # ── Open window ─────────────────────────────────────────────
+    _dbg("Opening window...")
     log.info("Opening window...")
 
     def _do_cleanup():

@@ -540,7 +540,11 @@ function scheduleProbe(url) {
 }
 
 function doProbe(url) {
-  if (!isValidUrl(url)) return;
+  if (!isValidUrl(url)) {
+    document.getElementById('errorText').textContent = 'Невалидный URL: ' + url;
+    document.getElementById('errorBox').classList.add('visible');
+    return;
+  }
   showProbing();
   probeXhr = new XMLHttpRequest();
   probeXhr.open('GET', '/probe?url=' + encodeURIComponent(url), true);
@@ -576,7 +580,7 @@ function doProbe(url) {
       document.getElementById('modeRow').classList.remove('hidden');
       renderResButtons();
     } catch(e) {
-      showError('Ошибка', 'Не удалось обработать ответ сервера');
+      showError('Ошибка', 'Не удалось обработать ответ сервера: ' + e.message);
     }
   };
   probeXhr.ontimeout = function() {
