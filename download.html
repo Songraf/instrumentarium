@@ -466,9 +466,6 @@
 </div>
 
 <script>
-/* ── Debug ───────────────────────────────────────────── */
-window._dbg = document.getElementById('dbg');
-
 /* ── Constants ───────────────────────────────────────────── */
 const LABELS = {
   download_video:  'Скачать видео',
@@ -715,7 +712,6 @@ function renderResButtons() {
 
     // Probe for real file size only when /probe didn't provide one
     if (!currentUrl) {
-      if (window._dbg) window._dbg.textContent += '\nSKIP probe: currentUrl is empty';
       continue;
     }
     if (best.filesize && best.filesize > 0) {
