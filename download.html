@@ -421,14 +421,18 @@
       ⬇️ Загрузки
     </button>
 
-    <p class="footer">
-      <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
-      <span class="cookie-tooltip-anchor" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #444;font-size:.6rem;color:#666;cursor:help;vertical-align:middle;position:relative;">?
-        <span class="cookie-tooltip" style="display:none;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:8px 12px;font-size:.68rem;color:#aaa;width:220px;text-align:center;line-height:1.4;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:100;pointer-events:none;">Используйте cookies, чтобы скачать видео из приватных страниц, доступных только после входа в аккаунт</span>
+    <p class="footer" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>
+        <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
+        <span class="cookie-tooltip-anchor" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #444;font-size:.6rem;color:#666;cursor:help;vertical-align:middle;position:relative;">?
+          <span class="cookie-tooltip" style="display:none;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:8px 12px;font-size:.68rem;color:#aaa;width:220px;text-align:center;line-height:1.4;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:100;pointer-events:none;">Используйте cookies, чтобы скачать видео из приватных страниц, доступных только после входа в аккаунт</span>
+        </span>
       </span>
     </p>
     <div id="dbg" style="display:none"></div>
   </div>
+
+  <div style="padding:8px 16px;font-size:.65rem;color:#444;text-align:left;">v0.1.0</div>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- COOKIES DIALOG                                        -->
@@ -538,56 +542,55 @@ function scheduleProbe(url) {
 
 function doProbe(url) {
   if (!isValidUrl(url)) {
-    document.getElementById('errorText').textContent = 'Невалидный URL: ' + url;
-    document.getElementById('errorBox').classList.add('visible');
-    return;
-  }
-  showProbing();
-  probeXhr = new XMLHttpRequest();
-  probeXhr.open('GET', '/probe?url=' + encodeURIComponent(url), true);
-  probeXhr.timeout = 35000;
-  probeXhr.onreadystatechange = function() {
-    if (probeXhr.readyState !== 4) return;
-    hideProbing();
-    probeXhr = null;
-    if (probeXhr.status !== 200 && probeXhr.status !== 0) {
-      showError('Ошибка', 'Не удалось проверить ссылку (HTTP ' + probeXhr.status + ')');
+      document.getElementById('errorText').textContent = 'Невалидный URL: ' + url;
+      document.getElementById('errorBox').classList.add('visible');
       return;
     }
-    if (probeXhr.status === 0) return; // aborted
-    try {
-      var data = JSON.parse(probeXhr.responseText);
-      console.log('DEBUG probe response:', JSON.stringify(data).substring(0, 200));
-      if (data.error) {
-        showError(data.error, null);
-        return;
-      }
-      probedFormats = data.formats || [];
-      probedAudioFormats = data.audio_formats || [];
-      probedTitle = data.title || '';
-      currentDuration = data.duration || 0;
-      if (!probedFormats.length && !probedAudioFormats.length) {
-        showError('Ошибка', 'Неправильная ссылка или видео недоступно');
-        hideResButtons();
-        document.getElementById('modeRow').classList.add('hidden');
-        document.getElementById('videoTitle').classList.remove('visible');
-        return;
-      }
-      document.getElementById('videoTitle').textContent = '📹 ' + probedTitle;
-      document.getElementById('videoTitle').classList.add('visible');
-      document.getElementById('modeRow').classList.remove('hidden');
-      renderResButtons();
-    } catch(e) {
-      showError('Ошибка', 'Не удалось обработать ответ сервера: ' + e.message);
-    }
-  };
-  probeXhr.ontimeout = function() {
-    hideProbing();
-    probeXhr = null;
-    showError('Ошибка', 'Таймаут проверки ссылки (30с)');
-  };
-  probeXhr.send();
-}
+    showProbing();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 35000);
+    fetch('/probe?url=' + encodeURIComponent(url), { signal: controller.signal })
+      .then(resp => {
+        clearTimeout(timeoutId);
+        hideProbing();
+        if (!resp.ok) {
+          showError('Ошибка', 'Не удалось проверить ссылку (HTTP ' + resp.status + ')');
+          return;
+        }
+        return resp.json();
+      })
+      .then(data => {
+        if (!data) return;
+        if (data.error) {
+          showError(data.error, null);
+          return;
+        }
+        probedFormats = data.formats || [];
+        probedAudioFormats = data.audio_formats || [];
+        probedTitle = data.title || '';
+        currentDuration = data.duration || 0;
+        if (!probedFormats.length && !probedAudioFormats.length) {
+          showError('Ошибка', 'Неправильная ссылка или видео недоступно');
+          hideResButtons();
+          document.getElementById('modeRow').classList.add('hidden');
+          document.getElementById('videoTitle').classList.remove('visible');
+          return;
+        }
+        document.getElementById('videoTitle').textContent = '📹 ' + probedTitle;
+        document.getElementById('videoTitle').classList.add('visible');
+        document.getElementById('modeRow').classList.remove('hidden');
+        renderResButtons();
+      })
+      .catch(err => {
+        clearTimeout(timeoutId);
+        hideProbing();
+        if (err.name === 'AbortError') {
+          showError('Ошибка', 'Таймаут проверки ссылки (30с)');
+        } else {
+          showError('Ошибка', 'Не удалось проверить ссылку: ' + err.message);
+        }
+      });
+  }
 
 function showProbing() { document.getElementById('probing').classList.add('visible'); }
 function hideProbing() { document.getElementById('probing').classList.remove('visible'); }
