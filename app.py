@@ -301,17 +301,13 @@ def _run_app():
     try:
         import webview
 
-        # Try to load HTML directly from file as fallback
-        import server_main as _srv
-        _html_path = os.path.join(_srv._BASE_DIR, "download.html")
-        if not os.path.exists(_html_path):
-            # Fall back to MEIPASS
-            _html_path = os.path.join(sys._MEIPASS, "download.html") if hasattr(sys, "_MEIPASS") else _html_path
-        log.info("Loading HTML from file: %s exists=%s", _html_path, os.path.exists(_html_path))
+        # Build URL to local server
+        _html_url = "http://127.0.0.1:18765"
+        log.info("Opening window with URL: %s", _html_url)
 
         window = webview.create_window(
             "Instrumentarium",
-            url="file://" + _html_path,
+            url=_html_url,
             width=620,
             height=720,
             resizable=False,
