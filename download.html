@@ -560,6 +560,7 @@ function doProbe(url) {
     if (probeXhr.status === 0) return; // aborted
     try {
       var data = JSON.parse(probeXhr.responseText);
+      console.log('DEBUG probe response:', JSON.stringify(data).substring(0, 200));
       if (data.error) {
         showError(data.error, null);
         return;
