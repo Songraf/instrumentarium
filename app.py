@@ -15,14 +15,6 @@ launches from the installed location.
 
 import os, sys, shutil, logging, subprocess
 
-# ── Version log ─────────────────────────────────────────────────
-try:
-    _vlog = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "instrumentarium_debug.log")
-    with open(_vlog, "w") as _f:
-        _f.write("version=0.1.0\n")
-except Exception:
-    pass
-
 # ── Determine paths ──────────────────────────────────────────────
 # When running from PyInstaller one-file: _MEIPASS = temp extraction dir
 # When running installed: _MEIPASS does not exist
