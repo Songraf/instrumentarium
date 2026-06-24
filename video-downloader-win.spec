@@ -10,12 +10,18 @@ try:
 except Exception:
     webview_datas, webview_binaries, webview_hiddenimports = [], [], ['webview']
 
+import os
+# Manually list all non-Python files in current directory
+extra_datas = []
+for f in os.listdir('.'):
+    if f.endswith(('.html', '.json', '.txt', '.png', '.ico', '.icns', '.svg', '.plist')):
+        extra_datas.append((f, '.'))
+
 a = Analysis(
     ['app.py', 'server_main.py'],
     pathex=[],
     binaries=webview_binaries,
-    datas=webview_datas + [
-        ('download.html', '.'),
+    datas=webview_datas + extra_datas + [
         ('server/', 'server'),
     ],
     hiddenimports=webview_hiddenimports + [
