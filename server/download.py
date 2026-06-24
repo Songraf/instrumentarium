@@ -227,5 +227,4 @@ def cleanup_old_jobs(max_age_seconds=3600):
 
 def mark_job_completed(jid, job_dict):
     """Mark a job as completed with timestamp for TTL cleanup."""
-    if jid in job_dict:
-        job_dict[jid]["_completed_at"] = time.time()
+    job_dict[jid]["_completed_at"] = time.time()
