@@ -58,7 +58,12 @@ jobs:
       - name: Install build deps
         shell: bash
         run: |
-          pip install pyinstaller pywebview
+          # Clean pip and pyinstaller caches
+          python3 -m pip cache purge 2>/dev/null || true
+          rm -rf ~/.cache/pyinstaller 2>/dev/null || true
+          rm -rf ~/Library/Caches/pyinstaller 2>/dev/null || true
+          # Reinstall pyinstaller clean
+          pip install --force-reinstall pyinstaller pywebview
           if [ "${{ runner.os }}" = "Windows" ]; then
             pip install cefpython3
           fi
@@ -74,8 +79,6 @@ jobs:
       - name: Build binary
         shell: bash
         run: |
-          # Force clean PyInstaller cache
-          python -c "import shutil, os, sys; cache = os.path.join(os.environ.get('LOCALAPPDATA' if sys.platform=='win32' else 'HOME', ''), 'pyinstaller', 'bincache'); shutil.rmtree(cache, errors='ignore') if os.path.isdir(cache) else None"
           pyinstaller ${{ matrix.spec }} --clean --distpath dist --workpath build
 
       - name: Sign and notarize (macOS)
