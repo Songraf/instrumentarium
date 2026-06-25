@@ -19,27 +19,48 @@ log = logging.getLogger("instrumentarium.server.download")
 download_jobs = {}
 probe_meta_jobs = {}
 
+# ── Probe-meta cache ─────────────────────────────────────────────────
+# Cache results by (url, format_id) to avoid redundant downloads when
+# switching modes or re-probing the same link. Format: {key: {"filesize": int, "duration": float}}
+_probe_meta_cache: dict[str, dict] = {}
+
 # ── Probe-meta runner ─────────────────────────────────────────────────
 
-_PROBE_DURATION = 15  # seconds to download before killing
+_PROBE_DURATION = 30  # seconds of video content to download before extrapolating
+
+
+def _cache_key(url, format_id):
+    """Build cache key for (url, format_id) pair."""
+    return f"{url}\x00{format_id or ''}"
 
 
 def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
-    """Run yt-dlp probe download in a background thread and store result."""
+    """Run yt-dlp probe download in a background thread and store result.
+
+    Strategy: download a fixed duration of video content (e.g. 30 seconds)
+    and extrapolate to the total duration. This is more reliable than
+    downloading for a fixed wall-clock time because it's based on video time,
+    not network speed.
+    """
     tmpdir = tempfile.mkdtemp(prefix="instr_probe_")
     try:
         tmpl = os.path.join(tmpdir, "probe.%(ext)s")
         fmt = format_id + "+bestaudio/best" if format_id and "+" not in format_id else (format_id if format_id else "best")
+        # Use --download-sections to grab exactly PROBE_DURATION seconds of video content
+        download_section = f"*0-{_PROBE_DURATION}"
         cmd = [yt_path, "-f", fmt,
-               "-o", tmpl, "--no-playlist", "--no-check-certificates",
+               "--download-sections", download_section,
+               "--no-playlist", "--no-check-certificates",
                "--retries", "1", "--newline", "--no-progress"]
         if state.cookies_path:
             cmd += ["--cookies", state.cookies_path]
-        cmd.append(url)
-        log.info("/probe-meta thread %s: starting", jid)
+        cmd.extend(["-o", tmpl, url])
+        log.info("/probe-meta thread %s: starting format_id=%s section=%s", jid, format_id, download_section)
         proc = _popen(cmd)
+        # Allow extra wall-clock time (video might download slower than real-time)
+        wall_timeout = _PROBE_DURATION + 60
         try:
-            proc.communicate(timeout=_PROBE_DURATION)
+            proc.communicate(timeout=wall_timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             try:
@@ -48,7 +69,7 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
                 pass
         except Exception:
             pass
-        probe_files = [f for f in os.listdir(tmpdir) if not f.startswith(".")]
+        probe_files = [f for f in os.listdir(tmpdir) if not f.startswith(".") and not f.endswith(".part")]
         total_size = 0
         if probe_files:
             for f in probe_files:
@@ -58,7 +79,9 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
         if video_duration and video_duration > _PROBE_DURATION and total_size > 0:
             result["filesize"] = int(total_size * (video_duration / _PROBE_DURATION))
         probe_meta_jobs[jid] = {"status": "done", **result}
-        log.info("/probe-meta thread %s: done size=%d", jid, total_size)
+        cache_key = _cache_key(url, format_id)
+        _probe_meta_cache[cache_key] = {"filesize": result["filesize"] or 0, "duration": float(video_duration or 0)}
+        log.info("/probe-meta thread %s: done raw_size=%d estimated_size=%d", jid, total_size, result["filesize"] or 0)
     except Exception as e:
         log.error("/probe-meta thread %s: error %s", jid, e)
         probe_meta_jobs[jid] = {"status": "error", "filesize": None, "error": str(e)}

@@ -1,5 +1,6 @@
 # INSTRUMENTARIUM — Build & Architecture Reference
 
+*Версия документа: 2026-06-25*
 *Этот документ — полное описание архитектуры, файлов, потоков данных и поведения приложения. Читать при начале любой новой сессии работы.*
 
 ---
@@ -207,7 +208,8 @@ Download Thread (daemon, server/download.py → JobLogger)
   └── subprocess.Popen(yt-dlp) → proc.communicate() → parse stdout
 
 ProbeMeta Thread (daemon, server/download.py → _run_probe_meta)
-  └── subprocess.Popen(yt-dlp probe) → download fragment → estimate filesize
+  └── yt-dlp --download-sections "*0-30" → скачивает 30 сек видеоконтента → экстраполирует на полную длительность
+  └── Кэш результатов ключён по (url, format_id) — сохраняется при переключении режимов
 
 Cleanup Thread (daemon, server_main.py → _cleanup_worker)
   └── Каждые 5 минут: cleanup_old_jobs(max_age_seconds=3600)
@@ -566,4 +568,4 @@ python -m pytest tests/ -v
 
 ---
 
-*Последнее обновление: 2026-06-09*
+*Последнее обновление: 2026-06-25*

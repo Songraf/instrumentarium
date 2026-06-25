@@ -497,12 +497,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_probe_meta(self):
         """Handle /probe-meta endpoint (async, returns job_id)."""
+        from server.download import _probe_meta_cache, _cache_key
         qs = parse_qs(urlparse(self.path).query)
         url = qs.get("url", [""])[0].strip()
         format_id = qs.get("format_id", [""])[0].strip()
         duration = qs.get("duration", ["0"])[0].strip()
         if not url:
             self._json({"error": "URL is required"})
+            return
+        # Check cache first — return immediately if already probed for this format
+        cache_key = _cache_key(url, format_id)
+        if cache_key in _probe_meta_cache:
+            cached = _probe_meta_cache[cache_key]
+            self._json({
+                "filesize": cached["filesize"],
+                "duration": cached.get("duration", 0),
+                "job_id": "cached",
+                "probe_duration": cached.get("duration", 0),
+                "status": "done",
+            })
             return
         yt = _find_ytdlp()
         if not yt:
