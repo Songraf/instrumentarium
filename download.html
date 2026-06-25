@@ -747,9 +747,16 @@ function renderResButtons() {
     if (!probedAudioFormats || !probedAudioFormats.length) {
       const btn = document.createElement('button');
       btn.className = 'res-btn';
-      btn.innerHTML = `<span class="res-label">${LABELS.download_audio}</span><span class="res-meta">${LABELS.audio_from_video}</span>`;
+      const sizeClass = 'size-loading';
+      const initialSize = 'Определяю…';
+      btn.dataset.formatId = '__best_audio__';
+      btn.dataset.ext = 'mp3';
+      btn.innerHTML = `<span class="res-label">${LABELS.download_audio}</span><span class="res-meta ${sizeClass}">${initialSize} · MP3</span>`;
       btn.onclick = () => startDownloadBestAudio();
       audioContainer.appendChild(btn);
+      if (currentUrl) {
+        startProbeMeta(currentUrl, '__best_audio__', btn, 'audio');
+      }
       return;
     }
     for (const af of probedAudioFormats) {
