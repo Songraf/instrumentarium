@@ -1,6 +1,6 @@
 # INSTRUMENTARIUM — Build & Architecture Reference
 
-*Версия документа: 2026-06-25*
+*Версия документа: 2026-06-26*
 *Этот документ — полное описание архитектуры, файлов, потоков данных и поведения приложения. Читать при начале любой новой сессии работы.*
 
 ---
@@ -478,16 +478,99 @@ build (matrix: linux, windows, macos; fail-fast: false)
   └── pip install pyinstaller pywebview
   └── Windows: pip install cefpython3
   └── pyinstaller <spec> --clean --distpath dist --workpath build
-  └── Архивация: tar.gz (linux/macos) или zip (windows)
+  └── Архивация: tar.gz (linux/macos) или raw binary (windows)
 
 release (только при теге v*)
-  └── GitHub Release с тремя архивами
+  └── GitHub Release с тремя файлами
 ```
 
 **Артефакты:**
-- `Instrumentarium-linux.tar.gz` → `Instrumentarium` + `download.html`
-- `Instrumentarium-windows.zip` → `Instrumentarium.exe` + `download.html`
-- `Instrumentarium-macos.tar.gz` → `Instrumentarium` + `download.html`
+- `Instrumentarium-linux` — Linux binary (~20 MB)
+- `Instrumentarium.exe` — Windows binary (~62 MB)
+- `Instrumentarium-macos.tar.gz` — macOS binary (~20 MB)
+
+---
+
+## 9.1 Релизный процесс (критически важно)
+
+### Правило: Все релизы — только после одобрения
+
+Разработка и релизы строго разделены. Автоматические релизы из `main` **отключены по договорённости**.
+
+### Пайплайн разработки
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        1. РАЗРАБОТКА                                │
+│                                                                     │
+│   feature branch (например, v0.1.0) от main                         │
+│     └── Код → Тесты → Локальная проверка (Playwright)               │
+│     └── Агент НЕ пушит в main без явного указания пользователя      │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                        2. ТЕСТИРОВАНИЕ ПОЛЬЗОВАТЕЛЕМ               │
+│                                                                     │
+│   Пользователь скачивает билд из CI (артефакт workflow)             │
+│     └── Тестирует на реальной машине                                │
+│     └── Если баги → возвращаемся в feature branch                   │
+│     └── Если всё ок → "давай релиз"                                 │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                        3. МЁРДЖ В MAIN                              │
+│                                                                     │
+│   feature branch → main (через PR или напрямую)                     │
+│     └── Агент пушит в main ТОЛЬКО после явного одобрения            │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                        4. ТЕГ И РЕЛИЗ                               │
+│                                                                     │
+│   Создание тега версии (например, v0.1.0)                            │
+│     └── CI автоматически: test → build → release                    │
+│     └── Тег создаётся ТОЛЬКО после мёрджа в main                    │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Что НЕЛЬЗЯ делать без одобрения
+
+| Действие | Когда допустимо |
+|----------|----------------|
+| Push в feature branch | Всегда (это и есть работа) |
+| Push в main | Только после одобрения пользователя |
+| Создание тега `v*` | Только после мёрджа в main |
+| Создание Release | Автоматически CI при теге (не вручную) |
+| Сборка PyInstaller локально | Всегда (для тестирования) |
+
+### Версионирование
+
+- Начинаем с `v0.1.0`
+- Каждый релиз увеличивает версию: `v0.1.0` → `v0.1.1` → `v0.2.0`
+- Версия отображается в UI (footer, левый нижний угол)
+- Версия НЕ пишется в `version=` в EXE() — это вызывает FileNotFoundError
+
+### Локальная сборка для тестирования
+
+```bash
+# Собрать билд локально (для тестирования перед релизом)
+python3 -m PyInstaller video-downloader.spec --clean
+
+# Запустить собранный билд
+./dist/Instrumentarium          # Linux
+dist\Instrumentarium.exe       # Windows
+
+# Или запустить из исходников (для быстрой итерации)
+python3 server_main.py
+```
+
+### Тестирование UI в Docker-контейнере
+
+```bash
+# В контейнере есть Xvfb + fluxbox + chromium + Playwright
+DISPLAY=:99 python3 -c "
+from playwright.sync_api import sync_playwright
+# ... см. tests/test_ui_sizes.py
+"
+```
 
 ---
 
