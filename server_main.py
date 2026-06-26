@@ -173,6 +173,9 @@ if hasattr(sys, "_MEIPASS"):
     _HTML_CANDIDATES.append(os.path.join(sys._MEIPASS, "download.html"))
 
 _HTML_CANDIDATES.append(os.path.join(SCRIPT_DIR, "download.html"))
+# Also check parent directory (dev layout: download.html is next to server/)
+parent_dir = os.path.dirname(SCRIPT_DIR)
+_HTML_CANDIDATES.append(os.path.join(parent_dir, "download.html"))
 
 if hasattr(sys, "_MEIPASS"):
     _exe_dir = os.path.dirname(os.path.abspath(sys.executable))
