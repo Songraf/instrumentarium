@@ -7,7 +7,7 @@ name: Build Portable Binaries
 
 on:
   push:
-    branches: [main, 'v*']
+    branches: ['*']
     tags: ['v*']
   workflow_dispatch:
 
