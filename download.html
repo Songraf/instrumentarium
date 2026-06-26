@@ -1156,6 +1156,7 @@ function openLog() { fetch('/open-log', { method: 'GET' }).catch(() => {}); }
 
 /* ── Download ─────────────────────────────────────────────── */
 let dlPoll = null;
+let _pollStopped = false;
 
 function showError(title, message) {
   document.getElementById('errorTitle').textContent = title;
@@ -1191,6 +1192,7 @@ function startDownloadBestAudio() {
 function _startDownload(url, dlMode, formatId, height, acodec) {
   _downloadActive = true;
   _cancelHandled = false;
+  _pollStopped = false;
   document.getElementById('dlProgress').style.display = 'block';
   document.getElementById('dlProgress').classList.add('fade-in');
   document.getElementById('cancelArea').style.display = '';
@@ -1228,9 +1230,11 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
     document.getElementById('pctText').textContent = '';
     let offset = 0;
     dlPoll = setInterval(() => {
+      if (_pollStopped) { clearInterval(dlPoll); dlPoll = null; return; }
       fetch('/log?job=' + data.job_id + '&offset=' + offset)
         .then(r => r.json())
         .then(d => {
+          if (_pollStopped) { return; }
           console.log('[POLL] status=' + d.status + ' cancelled=' + d.cancelled + ' _cancelHandled=' + _cancelHandled);
           if (d.lines) {
             if (d.speed != null) {
@@ -1324,14 +1328,16 @@ function _humanSpeed(bytesPerSec) {
 function cancelDownload() {
   console.log('[CANCEL] cancelDownload() called, _cancelHandled=' + _cancelHandled);
   if (_cancelHandled) { console.log('[CANCEL] already handled, skip'); return; }
-  // Use fetch with keep-alive disabled to avoid connection reuse issues in WebView2
+  // Stop polling immediately to avoid race condition
+  _pollStopped = true;
+  if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
+  _downloadActive = false;
   console.log('[CANCEL] sending POST /cancel...');
   fetch('/cancel', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: '{}',
-    cache: 'no-store',
-    credentials: 'omit'
+    cache: 'no-store'
   })
   .then(function(r) {
     console.log('[CANCEL] fetch status=' + r.status + ' statusText=' + r.statusText);
@@ -1339,13 +1345,10 @@ function cancelDownload() {
   })
   .then(function(text) {
     console.log('[CANCEL] fetch response: "' + text + '"');
-    var d = {};
-    try { d = JSON.parse(text); } catch(e) { console.error('[CANCEL] parse error: ' + e); }
     _applyCancelUI();
   })
   .catch(function(err) {
     console.error('[CANCEL] fetch error: ' + err);
-    // Even if fetch fails, apply UI changes (server may have killed the process)
     _applyCancelUI();
   });
 }
