@@ -191,6 +191,10 @@ class JobLogger(threading.Thread):
             STALL_INTERVAL = 15
 
             while True:
+                # Check if job was cancelled — exit loop immediately
+                if j.get("cancelled"):
+                    log.info("Job %s: cancelled by user, stopping", self.job_id)
+                    break
                 line = proc.stdout.readline() if proc.stdout else None
                 if not line:
                     if proc.poll() is not None:

@@ -57,15 +57,32 @@ class AppState:
         """Kill the currently running subprocess and its children. Returns True if a process was killed."""
         import os
         import signal
+        import platform
         with self._lock:
             proc = self._active_proc
             if proc and proc.poll() is None:
                 try:
-                    # Kill entire process group (catches ffmpeg, aria2c children)
-                    pgid = os.getpgid(proc.pid)
-                    os.killpg(pgid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
+                    if platform.system() == "Windows":
+                        # On Windows, use taskkill /T to kill process tree
+                        import subprocess
+                        subprocess.run(
+                            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                            capture_output=True, timeout=5
+                        )
+                    else:
+                        # Kill entire process group (catches ffmpeg, aria2c children)
+                        pgid = os.getpgid(proc.pid)
+                        os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, Exception):
+                    try:
+                        proc.kill()
+                    except Exception:
+                        pass
+                # Also kill by PID directly as fallback
+                try:
                     proc.kill()
+                except Exception:
+                    pass
                 try:
                     proc.wait(timeout=5)
                 except Exception:

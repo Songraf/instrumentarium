@@ -136,7 +136,8 @@ def parse_speed(s):
 def popen_no_console(cmd, **kwargs):
     """subprocess.Popen that never flashes a console window on Windows."""
     if platform.system() == "Windows":
-        kwargs.setdefault("creationflags", 0x08000000)  # CREATE_NO_WINDOW
+        # CREATE_NO_WINDOW + CREATE_NEW_PROCESS_GROUP (needed for TerminateProcessGroup)
+        kwargs.setdefault("creationflags", 0x08000000 | 0x00000200)
     else:
         kwargs.setdefault("start_new_session", True)  # new process group for killpg
     kwargs.setdefault("stdout", subprocess.PIPE)
