@@ -45,7 +45,14 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
     tmpdir = tempfile.mkdtemp(prefix="instr_probe_")
     try:
         tmpl = os.path.join(tmpdir, "probe.%(ext)s")
-        fmt = format_id + "+bestaudio/best" if format_id and "+" not in format_id else (format_id if format_id else "best")
+        if format_id == '__best_audio__':
+            # For audio, use bestaudio with fallback to best (video+audio)
+            # yt-dlp will extract audio during post-processing
+            fmt = "bestaudio[ext=m4a]/bestaudio/best"
+        elif format_id and "+" not in format_id:
+            fmt = format_id + "+bestaudio/best"
+        else:
+            fmt = format_id if format_id else "best"
         # Use --download-sections to grab exactly PROBE_DURATION seconds of video content
         download_section = f"*0-{_PROBE_DURATION}"
         cmd = [yt_path, "-f", fmt,
@@ -55,7 +62,7 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
         if state.cookies_path:
             cmd += ["--cookies", state.cookies_path]
         cmd.extend(["-o", tmpl, url])
-        log.info("/probe-meta thread %s: starting format_id=%s section=%s", jid, format_id, download_section)
+        log.info("/probe-meta thread %s: starting format_id=%s fmt=%s section=%s", jid, format_id, fmt, download_section)
         proc = _popen(cmd)
         # Allow extra wall-clock time (video might download slower than real-time)
         wall_timeout = _PROBE_DURATION + 60
@@ -77,7 +84,17 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
         result = {"filesize": total_size if total_size > 0 else None,
                   "probe_duration": _PROBE_DURATION}
         if video_duration and video_duration > _PROBE_DURATION and total_size > 0:
-            result["filesize"] = int(total_size * (video_duration / _PROBE_DURATION))
+            if format_id == '__best_audio__':
+                # For audio, the downloaded file is video+audio muxed.
+                # Extrapolating total_size gives video+audio size, not pure audio.
+                # Estimate audio-only size using typical audio bitrate (~128 kbps).
+                audio_bitrate_kbps = 128
+                audio_size = int(video_duration * audio_bitrate_kbps * 1024 / 8)
+                result["filesize"] = audio_size
+                log.info("/probe-meta thread %s: audio estimate %d MB (based on %dkbps)",
+                         jid, audio_size / (1024*1024), audio_bitrate_kbps)
+            else:
+                result["filesize"] = int(total_size * (video_duration / _PROBE_DURATION))
         probe_meta_jobs[jid] = {"status": "done", **result}
         cache_key = _cache_key(url, format_id)
         _probe_meta_cache[cache_key] = {"filesize": result["filesize"] or 0, "duration": float(video_duration or 0)}
