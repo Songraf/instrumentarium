@@ -253,20 +253,10 @@
     color: #555;
     flex-shrink: 0;
   }
-  .card-footer .cookie-link {
+  .card-footer .footer {
+    margin-top: 0;
     flex: 1;
-    text-align: center;
-    cursor: pointer;
-    color: #888;
-    background: none;
-    border: none;
-    font-size: .7rem;
-    padding: 0;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-    transition: color .2s;
   }
-  .card-footer .cookie-link:hover { color: #a78bfa; }
   .big-downloads-btn {
     width: 36px; height: 36px; padding: 0;
     background: linear-gradient(135deg, rgba(108,92,231,.2), rgba(167,139,250,.15));
@@ -464,8 +454,8 @@
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
       </div>
-      <div style="text-align:center;margin-top:8px;">
-        <button id="cancelBtn" onclick="cancelDownload()" style="position:relative;z-index:10;padding:8px 20px;background:rgba(255,71,87,.15);border:1px solid rgba(255,71,87,.3);border-radius:10px;color:#ff6b6b;cursor:pointer;font-size:.82rem;font-weight:600;transition:all .2s;">✕ Остановить</button>
+      <div style="text-align:center;margin-top:8px;position:relative;z-index:20;">
+        <button id="cancelBtn" style="position:relative;z-index:999;pointer-events:auto;padding:10px 24px;background:rgba(255,71,87,.2);border:2px solid rgba(255,71,87,.5);border-radius:12px;color:#ff6b6b;cursor:pointer;font-size:.85rem;font-weight:700;transition:all .2s;">✕ Остановить</button>
       </div>
       <div class="error-toast" id="errorToast">
         <div class="title" id="errorTitle">❌ Ошибка</div>
@@ -476,7 +466,12 @@
 
     <div class="card-footer">
       <span class="footer-version">v0.1.0</span>
-      <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
+      <p class="footer">
+        <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
+        <span class="cookie-tooltip-anchor" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #444;font-size:.6rem;color:#666;cursor:help;vertical-align:middle;position:relative;">?
+          <span class="cookie-tooltip" style="display:none;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:8px 12px;font-size:.68rem;color:#aaa;width:220px;text-align:center;line-height:1.4;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:100;pointer-events:none;">Используйте cookies, чтобы скачать видео из приватных страниц, доступных только после входа в аккаунт</span>
+        </span>
+      </p>
       <button class="big-downloads-btn" onclick="openFolder()" title="Открыть папку загрузок">📁</button>
     </div>
   </div>
@@ -981,6 +976,17 @@ fetch('/status').then(r => r.json()).then(d => {
   downloadScreen.style.display = 'none';
 });
 
+/* ── Bind cancel button (addEventListener for pywebview compat) ── */
+document.addEventListener('DOMContentLoaded', function() {
+  var _cancelBtn = document.getElementById('cancelBtn');
+  if (_cancelBtn) {
+    _cancelBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      cancelDownload();
+    });
+  }
+});
+
 /* ── Setup wizard ─────────────────────────────────────────── */
 function startSetup() {
   const btn = document.getElementById('setupBtn');
@@ -1230,11 +1236,14 @@ function enableDlButtons() {
 }
 
 function cancelDownload() {
-  fetch('/cancel', { method: 'POST' })
-    .then(r => r.json())
-    .then(d => {
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', '/cancel', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.onreadystatechange = function() {
+    if (xhr.readyState === 4) {
+      var d = {};
+      try { d = JSON.parse(xhr.responseText); } catch(e) {}
       if (d.ok || d.message) {
-        // Immediately reset some UI elements
         _downloadActive = false;
         document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
         document.getElementById('dlStatusRight').textContent = '';
@@ -1242,10 +1251,10 @@ function cancelDownload() {
         document.getElementById('dlBar').classList.remove('done');
         document.getElementById('pctText').textContent = '';
         enableDlButtons();
-        // The main dlPoll will handle fade-out when it receives cancelled status
       }
-    })
-    .catch(() => {});
+    }
+  };
+  xhr.send('{}');
 }
 /* ── Cookies dialog ─────────────────────────────────────── */
 function showCookiesDialog() {
