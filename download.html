@@ -235,7 +235,7 @@
 
   /* ── App footer (version, below card) ───────────────────── */
   .app-footer {
-    text-align: center; padding: 8px; font-size: .7rem; color: #555;
+      display: none;
   }
   /* ── Card footer (version + downloads button) ──────────────── */
   .card { position: relative; }
@@ -270,7 +270,7 @@
     display: flex; justify-content: space-between; align-items: center;
     font-size: .72rem; color: #666; margin-top: 6px;
   }
-  .dl-status-left { color: #666; flex: 1; min-width: 0; padding-right: 8px; }
+  .dl-status-left { color: #666; flex: 1; padding-right: 8px; }
   .dl-status-center { color: #c4b5fd; font-weight: 700; font-size: .82rem; text-align: center; flex: 1; white-space: nowrap; }
   .dl-status-right { color: #666; font-size: .72rem; text-align: right; flex-shrink: 0; }
   /* ── Probing spinner ──────────────────────────────────────── */
@@ -447,18 +447,19 @@
       </div>
     </div>
 
-    <p class="footer">
-      <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
-      <span class="cookie-tooltip-anchor" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #444;font-size:.6rem;color:#666;cursor:help;vertical-align:middle;position:relative;">?
-        <span class="cookie-tooltip" style="display:none;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:8px 12px;font-size:.68rem;color:#aaa;width:220px;text-align:center;line-height:1.4;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:100;pointer-events:none;">Используйте cookies, чтобы скачать видео из приватных страниц, доступных только после входа в аккаунт</span>
+    <p class="footer" style="justify-content:space-between;">
+      <span style="font-size:.7rem;color:#555;">v0.1.0</span>
+      <span style="display:flex;align-items:center;gap:4px;">
+        <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
+        <span class="cookie-tooltip-anchor" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #444;font-size:.6rem;color:#666;cursor:help;vertical-align:middle;position:relative;">?
+          <span class="cookie-tooltip" style="display:none;position:absolute;bottom:140%;left:50%;transform:translateX(-50%);background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:8px 12px;font-size:.68rem;color:#aaa;width:220px;text-align:center;line-height:1.4;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:100;pointer-events:none;">Используйте cookies, чтобы скачать видео из приватных страниц, доступных только после в аккаунт</span>
+        </span>
       </span>
     </p>
-    <div id="dbg" style="display:none"></div>
     <button class="big-downloads-btn" onclick="openFolder()" title="Открыть папку загрузок">
       📁
     </button>
   </div>
-  <div class="app-footer">v0.1.0</div>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- COOKIES DIALOG                                        -->
@@ -1098,7 +1099,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
   // Disable mode buttons
   document.getElementById('optVideo').classList.add('dl-disabled');
   document.getElementById('optAudio').classList.add('dl-disabled');
-  currentDlJobId = null;
+  // Don't reset currentDlJobId — it should persist across deps_ready retry
   fetch('/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1209,8 +1210,7 @@ function enableDlButtons() {
 }
 
 function cancelDownload() {
-  if (!currentDlJobId) return;
-  fetch('/cancel?job_id=' + encodeURIComponent(currentDlJobId), { method: 'POST' })
+  fetch('/cancel', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
       if (d.ok || d.message) {
