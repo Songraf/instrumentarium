@@ -314,7 +314,7 @@ def _run_app():
             url=_html_url,
             width=620,
             height=720,
-            resizable=False,
+            resizable=True,
         )
 
         if window:
@@ -332,6 +332,8 @@ def _run_app():
 
             window.events.closing += _on_closing
             window.events.closed += lambda: os._exit(0)
+
+
 
         def _sigterm_handler(signum, frame):
             _do_cleanup()

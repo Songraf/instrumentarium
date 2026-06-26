@@ -454,14 +454,14 @@
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
       </div>
-      <div style="text-align:center;margin-top:8px;">
-        <button id="cancelBtn" type="button" style="padding:10px 24px;background:rgba(255,71,87,.2);border:2px solid rgba(255,71,87,.5);border-radius:12px;color:#ff6b6b;cursor:pointer;font-size:.85rem;font-weight:700;transition:all .2s;">✕ Остановить</button>
-      </div>
       <div class="error-toast" id="errorToast">
         <div class="title" id="errorTitle">❌ Ошибка</div>
         <div class="message" id="errorMessage"></div>
         <div class="hint"><a href="#" onclick="openLog(); return false;">Подробности в instrumentarium.log</a></div>
       </div>
+    </div>
+    <div id="cancelArea" style="text-align:center;margin-top:8px;">
+      <button id="cancelBtn" type="button" style="padding:10px 24px;background:rgba(255,71,87,.2);border:2px solid rgba(255,71,87,.5);border-radius:12px;color:#ff6b6b;cursor:pointer;font-size:.85rem;font-weight:700;transition:all .2s;">✕ Остановить</button>
     </div>
 
     <div class="card-footer">
@@ -977,6 +977,54 @@ function clearUrl() {
   urlInput.focus();
 }
 
+/* ── Debug panel (F12 alternative for pywebview) ── */
+(function() {
+  var _dbgPanel = null;
+  var _dbgVisible = false;
+  function _ensurePanel() {
+    if (_dbgPanel) return _dbgPanel;
+    _dbgPanel = document.createElement('div');
+    _dbgPanel.id = 'dbgPanel';
+    _dbgPanel.style.cssText = 'display:none;position:fixed;bottom:0;left:0;right:0;max-height:200px;overflow:auto;background:rgba(0,0,0,.85);color:#0f0;font-family:monospace;font-size:11px;padding:8px;z-index:99999;white-space:pre-wrap;word-break:break-all;border-top:2px solid #333;';
+    document.body.appendChild(_dbgPanel);
+    return _dbgPanel;
+  }
+  function _dbgLog(type, msg) {
+    var p = _ensurePanel();
+    var line = '[' + new Date().toLocaleTimeString() + '][' + type + '] ' + msg;
+    p.textContent += line + '\n';
+    p.scrollTop = p.scrollHeight;
+    if (_dbgVisible) p.style.display = 'block';
+  }
+  // Intercept console methods
+  var _origLog = console.log, _origErr = console.error, _origWarn = console.warn;
+  console.log = function() { _dbgLog('log', Array.from(arguments).join(' ')); _origLog.apply(console, arguments); };
+  console.error = function() { _dbgLog('ERR', Array.from(arguments).join(' ')); _origErr.apply(console, arguments); };
+  console.warn = function() { _dbgLog('wrn', Array.from(arguments).join(' ')); _origWarn.apply(console, arguments); };
+  // Intercept errors
+  window.__errors = [];
+  window.addEventListener('error', function(e) {
+    var msg = e.message + ' @ ' + e.filename + ':' + e.lineno;
+    _dbgLog('ERR', msg);
+    window.__errors.push(msg);
+  });
+  window.addEventListener('unhandledrejection', function(e) {
+    _dbgLog('REJ', e.reason);
+    window.__errors.push('Promise: ' + e.reason);
+  });
+  // Toggle with F12 or Ctrl+Shift+I
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && e.key === 'I')) {
+      e.preventDefault();
+      _dbgVisible = !_dbgVisible;
+      _ensurePanel().style.display = _dbgVisible ? 'block' : 'none';
+    }
+  });
+  // Expose for programmatic use
+  window.__dbgLog = _dbgLog;
+  window.__showDbg = function() { _dbgVisible = true; _ensurePanel().style.display = 'block'; };
+})();
+
 /* ── Bootstrap ───────────────────────────────────────────── */
 let setupPoll = null;
 
@@ -1000,8 +1048,9 @@ fetch('/status').then(r => r.json()).then(d => {
 (function() {
   var _cancelFired = false;
   var btn = document.getElementById('cancelBtn');
-  function _doCancel() {
-    if (_cancelFired) return;
+  function _doCancel(e) {
+    console.log('[CANCEL] click event fired, type=' + (e ? e.type : 'none'));
+    if (_cancelFired) { console.log('[CANCEL] dedup skip'); return; }
     _cancelFired = true;
     cancelDownload();
     setTimeout(function() { _cancelFired = false; }, 1000);
@@ -1009,7 +1058,9 @@ fetch('/status').then(r => r.json()).then(d => {
   if (btn) {
     btn.onclick = _doCancel;
     btn.addEventListener('click', _doCancel);
-    btn.addEventListener('touchend', _doCancel);
+    btn.addEventListener('mousedown', function(e) { console.log('[CANCEL] mousedown'); });
+  } else {
+    console.error('[CANCEL] cancelBtn not found!');
   }
 })();
 
@@ -1266,13 +1317,16 @@ function _humanSpeed(bytesPerSec) {
 }
 
 function cancelDownload() {
+  console.log('[CANCEL] cancelDownload() called');
   var xhr = new XMLHttpRequest();
   xhr.open('POST', '/cancel', true);
   xhr.setRequestHeader('Content-Type', 'application/json');
   xhr.onreadystatechange = function() {
+    console.log('[CANCEL] readyState=' + xhr.readyState + ' status=' + xhr.status);
     if (xhr.readyState === 4) {
+      console.log('[CANCEL] response: ' + xhr.responseText);
       var d = {};
-      try { d = JSON.parse(xhr.responseText); } catch(e) {}
+      try { d = JSON.parse(xhr.responseText); } catch(e) { console.error('[CANCEL] parse error: ' + e); }
       if (d.ok || d.message) {
         _downloadActive = false;
         document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
@@ -1281,9 +1335,11 @@ function cancelDownload() {
         document.getElementById('dlBar').classList.remove('done');
         document.getElementById('pctText').textContent = '';
         enableDlButtons();
+        console.log('[CANCEL] UI updated');
       }
     }
   };
+  xhr.onerror = function() { console.error('[CANCEL] XHR error'); };
   xhr.send('{}');
 }
 /* ── Cookies dialog ─────────────────────────────────────── */
