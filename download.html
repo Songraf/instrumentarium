@@ -1167,11 +1167,13 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
           if (d.status === 'done' || d.status === 'error') {
             clearInterval(dlPoll);
             _downloadActive = false;
-            document.getElementById('dlBar').style.width = '100%';
-            document.getElementById('dlBar').classList.add('done');
             document.getElementById('pctText').textContent = '';
             document.getElementById('dlStatusRight').textContent = '';
             if (d.cancelled) {
+              // Keep bar at current position, turn red briefly, then fade
+              var _bar = document.getElementById('dlBar');
+              _bar.style.background = '#ff4757';
+              _bar.classList.remove('done');
               document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
               // Fade out progress block after 2 seconds
               setTimeout(function() {
@@ -1180,9 +1182,15 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
                 setTimeout(function() {
                   prog.style.display = 'none';
                   prog.classList.remove('fading');
+                  _bar.style.width = '0%';
+                  _bar.style.background = '';
                 }, 400);
               }, 2000);
-            } else if (d.status === 'done') {
+            } else {
+              document.getElementById('dlBar').style.width = '100%';
+              document.getElementById('dlBar').classList.add('done');
+            }
+            if (!d.cancelled && d.status === 'done') {
               document.getElementById('dlStatusLeft').textContent = '✅ Готово!';
             } else {
               document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки';
