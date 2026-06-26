@@ -710,7 +710,9 @@ function _pollProbeMeta(jobId, btn, mode) {
     attempts++;
     if (attempts > maxAttempts) return;
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', window.location.origin + '/probe-meta-status?id=' + encodeURIComponent(jobId), true);
+    var loc = window.location;
+    var origin = loc.origin || (loc.protocol + '//' + loc.host);
+    xhr.open('GET', origin + '/probe-meta-status?id=' + encodeURIComponent(jobId), true);
     xhr.timeout = 5000;
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== 4) return;
@@ -1310,6 +1312,22 @@ function clearCookies() {
     helpAnchor.onmouseleave = function() { helpTip.style.display = 'none'; };
   }
 })();
+
+/* ── Global error handler — show JS errors in UI ── */
+window.addEventListener('error', function(e) {
+  var el = document.getElementById('errorText');
+  if (el) {
+    el.textContent = 'JS Error: ' + (e.message || e.error) + ' (line ' + e.lineno + ')';
+    document.getElementById('errorBox').classList.add('visible');
+  }
+});
+window.addEventListener('unhandledrejection', function(e) {
+  var el = document.getElementById('errorText');
+  if (el) {
+    el.textContent = 'Promise error: ' + (e.reason && e.reason.message ? e.reason.message : e.reason);
+    document.getElementById('errorBox').classList.add('visible');
+  }
+});
 
 </script>
 </body>

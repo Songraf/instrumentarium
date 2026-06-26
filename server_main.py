@@ -326,7 +326,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._handle_download()
             return
 
-        if self.path == "/cancel":
+        if urlparse(self.path).path == "/cancel":
             self._handle_cancel()
             return
 
