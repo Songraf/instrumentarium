@@ -240,6 +240,11 @@ class JobLogger(threading.Thread):
                         pass
 
             proc.wait()
+            if j.get("cancelled"):
+                # Job was cancelled by user — don't overwrite status
+                j["status"] = "error"
+                j["speed"] = None
+                return
             if proc.returncode == 0:
                 j["status"] = "done"
                 j["speed"] = None

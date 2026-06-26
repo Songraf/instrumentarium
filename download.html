@@ -102,7 +102,13 @@
 
   .progress-section { margin-top: 24px; text-align: left; }
   .progress-bg { background: #0a0a1a; border-radius: 8px; height: 6px; overflow: hidden; }
-  .progress-bg.tall { height: 28px; border-radius: 14px; }
+  .progress-bg.tall {
+    height: 32px; border-radius: 16px;
+    border: 1px solid rgba(108,92,231,.3);
+    box-shadow: inset 0 2px 6px rgba(0,0,0,.4);
+    position: relative; overflow: visible;
+  }
+  .progress-bg.tall .progress-bar { border-radius: 16px; }
   .progress-bar {
     height: 100%; width: 0%;
     background: linear-gradient(90deg, #e056a0, #a78bfa, #e056a0);
@@ -110,6 +116,14 @@
     transition: width .5s ease; animation: shimmer 1.5s linear infinite;
   }
   .progress-bar.done { animation: none; background: #4caf50; }
+  .pct-text {
+    position: absolute; inset: 0;
+    text-align: center; z-index: 2;
+    font-size: .78rem; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,.7);
+    pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+  }
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
   .progress-label {
@@ -255,21 +269,6 @@
   .dl-status-left { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 35%; }
   .dl-status-center { color: #c4b5fd; font-weight: 700; font-size: .82rem; text-align: center; flex: 1; white-space: nowrap; }
   .dl-status-right { color: #6c5ce7; font-weight: 700; font-size: .95rem; text-align: right; flex-shrink: 0; }
-  .progress-bar {
-    position: relative;
-    height: 28px !important;
-    line-height: 28px;
-    border-radius: 14px !important;
-    overflow: hidden;
-  }
-  .progress-bar .pct-text {
-    position: absolute; inset: 0;
-    text-align: center; z-index: 2;
-    font-size: .8rem; font-weight: 700; color: #fff;
-    text-shadow: 0 0 6px rgba(0,0,0,.5);
-    pointer-events: none;
-  }
-
   /* ── Probing spinner ──────────────────────────────────────── */
   .probing { display: none; text-align: center; padding: 12px; color: #555; font-size: .8rem; }
   .probing.visible { display: block; }
@@ -372,7 +371,7 @@
     </button>
 
     <div class="progress-section" id="setupProgress" style="display:none">
-      <div class="progress-bg"><div class="progress-bar" id="setupBar"></div></div>
+      <div class="progress-bg tall"><div class="progress-bar" id="setupBar"></div></div>
       <div class="progress-label">
         <span class="progress-status" id="setupStatus">Проверяю…</span>
         <span class="progress-pct" id="setupPct">0%</span>
@@ -428,7 +427,7 @@
     </div>
 
     <div class="dl-progress" id="dlProgress" style="display:none">
-      <div class="progress-bg tall"><div class="progress-bar" id="dlBar"><span class="pct-text" id="pctText"></span></div></div>
+      <div class="progress-bg tall"><div class="progress-bar" id="dlBar"></div><span class="pct-text" id="pctText"></span></div>
       <div class="dl-status">
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
@@ -443,10 +442,6 @@
       </div>
     </div>
 
-    <button class="big-downloads-btn" onclick="openFolder()" title="Открыть папку загрузок">
-      📁
-    </button>
-
     <p class="footer">
       <button class="cookie-link" onclick="showCookiesDialog()">🍪 Cookies</button>
       <span class="cookie-tooltip-anchor" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1px solid #444;font-size:.6rem;color:#666;cursor:help;vertical-align:middle;position:relative;">?
@@ -454,9 +449,11 @@
       </span>
     </p>
     <div id="dbg" style="display:none"></div>
+    <button class="big-downloads-btn" onclick="openFolder()" title="Открыть папку загрузок">
+      📁
+    </button>
+    <div style="text-align:center;padding:8px;font-size:.7rem;color:#555;">v0.1.0</div>
   </div>
-
-  <div style="padding:16px;font-size:.75rem;color:#999;text-align:left;">v0.1.0</div>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- COOKIES DIALOG                                        -->

@@ -54,11 +54,18 @@ class AppState:
             self._active_proc = value
 
     def kill_active_proc(self):
-        """Kill the currently running subprocess if any. Returns True if a process was killed."""
+        """Kill the currently running subprocess and its children. Returns True if a process was killed."""
+        import os
+        import signal
         with self._lock:
             proc = self._active_proc
             if proc and proc.poll() is None:
-                proc.kill()
+                try:
+                    # Kill entire process group (catches ffmpeg, aria2c children)
+                    pgid = os.getpgid(proc.pid)
+                    os.killpg(pgid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    proc.kill()
                 try:
                     proc.wait(timeout=5)
                 except Exception:

@@ -137,6 +137,8 @@ def popen_no_console(cmd, **kwargs):
     """subprocess.Popen that never flashes a console window on Windows."""
     if platform.system() == "Windows":
         kwargs.setdefault("creationflags", 0x08000000)  # CREATE_NO_WINDOW
+    else:
+        kwargs.setdefault("start_new_session", True)  # new process group for killpg
     kwargs.setdefault("stdout", subprocess.PIPE)
     kwargs.setdefault("stderr", subprocess.STDOUT)
     kwargs.setdefault("text", True)

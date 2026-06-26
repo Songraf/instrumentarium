@@ -640,10 +640,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     job = jobj
                     jid = j
                     break
-        # Mark job as cancelled
+        # Mark job as cancelled immediately (before cleanup) to prevent race with JobLogger
         if job:
-            job["status"] = "error"
             job["cancelled"] = True
+            job["status"] = "error"
             job["log"].append("[cancelled] Download cancelled by user")
             # Remove the final file (renamed from .part) if it exists
             filepath = job.get("filepath")
@@ -661,12 +661,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     log.info("/cancel: removed partial file %s", partial)
                 except OSError as e:
                     log.warning("/cancel: failed to remove %s: %s", partial, e)
-            # Also remove any .part/.ytdl files in output dir
+            # Also remove ALL temp files in output dir (.part, .ytdl, .mp4.part, etc.)
             out_dir = state.output_base
             if out_dir and os.path.isdir(out_dir):
                 try:
                     for f in os.listdir(out_dir):
-                        if f.endswith('.part') or f.endswith('.ytdl') or f.endswith('.mp4.part'):
+                        if f.endswith('.part') or f.endswith('.ytdl') or '.ytdl' in f or '.part' in f:
                             full = os.path.join(out_dir, f)
                             try:
                                 os.remove(full)
