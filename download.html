@@ -240,13 +240,29 @@
     transform: translateY(-1px);
   }
 
-  .dl-progress { margin-top: 12px; }
+  .dl-progress { margin-top: 12px; transition: opacity .4s ease; }
+  .dl-progress.fading { opacity: 0; pointer-events: none; }
   .dl-status {
     display: flex; justify-content: space-between; align-items: center;
     font-size: .72rem; color: #666; margin-top: 6px;
   }
-  .dl-status-left { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75%; }
-  .dl-status-right { color: #a78bfa; font-weight: 600; text-align: right; flex-shrink: 0; }
+  .dl-status-left { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 35%; }
+  .dl-status-center { color: #c4b5fd; font-weight: 700; font-size: .82rem; text-align: center; flex: 1; white-space: nowrap; }
+  .dl-status-right { color: #6c5ce7; font-weight: 700; font-size: .95rem; text-align: right; flex-shrink: 0; }
+  .progress-bar {
+    position: relative;
+    height: 28px !important;
+    line-height: 28px;
+    border-radius: 14px !important;
+    overflow: hidden;
+  }
+  .progress-bar .pct-text {
+    position: absolute; inset: 0;
+    text-align: center; z-index: 2;
+    font-size: .8rem; font-weight: 700; color: #fff;
+    text-shadow: 0 0 6px rgba(0,0,0,.5);
+    pointer-events: none;
+  }
 
   /* ── Probing spinner ──────────────────────────────────────── */
   .probing { display: none; text-align: center; padding: 12px; color: #555; font-size: .8rem; }
@@ -406,9 +422,10 @@
     </div>
 
     <div class="dl-progress" id="dlProgress" style="display:none">
-      <div class="progress-bg"><div class="progress-bar" id="dlBar"></div></div>
+      <div class="progress-bg"><div class="progress-bar" id="dlBar"><span class="pct-text" id="pctText"></span></div></div>
       <div class="dl-status">
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
+        <span class="dl-status-center" id="dlStatusCenter"></span>
         <span class="dl-status-right" id="dlStatusRight"></span>
       </div>
       <div style="text-align:center;margin-top:8px;">
@@ -1124,17 +1141,34 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             _downloadActive = false;
             document.getElementById('dlBar').style.width = '100%';
             document.getElementById('dlBar').classList.add('done');
+            document.getElementById('pctText').textContent = '';
             document.getElementById('dlStatusRight').textContent = '';
             if (d.status === 'done') { document.getElementById('dlStatusLeft').textContent = '✅ Готово!'; }
             else { document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки'; }
+            document.getElementById('dlStatusCenter').textContent = '';
             enableDlButtons();
           } else {
             // Parse real progress from yt-dlp output (all lines, not just filtered)
+            var latestPct = null;
             for (const l of d.lines) {
               const pctMatch = l.match(/(\d+\.?\d*)%/);
               if (pctMatch) {
-                const pct = Math.min(parseFloat(pctMatch[1]), 99);
-                dlBar.style.width = pct + '%';
+                latestPct = Math.min(parseFloat(pctMatch[1]), 99);
+              }
+            }
+            if (latestPct !== null) {
+              dlBar.style.width = latestPct + '%';
+              // Update center text: downloaded / total
+              var downloaded = d.downloaded_bytes || 0;
+              var total = d.filesize || 0;
+              if (total > 0) {
+                document.getElementById('pctText').textContent =
+                  _human(downloaded) + ' / ' + _human(total);
+                document.getElementById('dlStatusCenter').textContent =
+                  _human(downloaded) + ' / ' + _human(total);
+              } else {
+                document.getElementById('pctText').textContent = latestPct.toFixed(1) + '%';
+                document.getElementById('dlStatusCenter').textContent = latestPct.toFixed(1) + '%';
               }
             }
           }
@@ -1173,10 +1207,21 @@ function cancelDownload() {
         _downloadActive = false;
         if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
         document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
+        document.getElementById('dlStatusCenter').textContent = '';
+        document.getElementById('dlStatusRight').textContent = '';
         document.getElementById('dlBar').style.width = '0%';
         document.getElementById('dlBar').classList.remove('done');
-        document.getElementById('dlStatusRight').textContent = '';
+        document.getElementById('pctText').textContent = '';
         enableDlButtons();
+        // Fade out the whole progress block after 2 seconds
+        setTimeout(function() {
+          var prog = document.getElementById('dlProgress');
+          prog.classList.add('fading');
+          setTimeout(function() {
+            prog.style.display = 'none';
+            prog.classList.remove('fading');
+          }, 400);
+        }, 2000);
       }
     })
     .catch(() => {});

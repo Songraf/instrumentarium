@@ -281,6 +281,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "status": j["status"],
                 "speed": j.get("speed"),
                 "filesize": j.get("filesize"),
+                "downloaded_bytes": j.get("downloaded_bytes"),
                 "stall_warning": j.get("stall_warning"),
             })
             return

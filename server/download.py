@@ -224,15 +224,20 @@ class JobLogger(threading.Thread):
                     try:
                         size_str = line.split(" of ")[1].split(" at ")[0].strip()
                         j["filesize"] = parse_size(size_str)
-                        log.debug("parsed filesize: %d from '%s'", j["filesize"], size_str)
-                    except (IndexError, ValueError) as e:
-                        log.debug("parse_size error: %s", e)
+                    except (IndexError, ValueError):
+                        pass
                     try:
                         speed_str = line.split(" at ")[1].split()[0]
                         j["speed"] = parse_speed(speed_str)
-                        log.debug("parsed speed: %d from '%s'", j["speed"], speed_str)
-                    except (IndexError, ValueError) as e:
-                        log.debug("parse_speed error: %s", e)
+                    except (IndexError, ValueError):
+                        pass
+                    try:
+                        pct_str = line.split("%")[0].split()[-1]
+                        pct_val = float(pct_str) / 100.0
+                        if j.get("filesize"):
+                            j["downloaded_bytes"] = int(j["filesize"] * pct_val)
+                    except (IndexError, ValueError, ZeroDivisionError):
+                        pass
 
             proc.wait()
             if proc.returncode == 0:
