@@ -117,38 +117,36 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
+          pattern: '*instrumentarium*'
 
       - name: Prepare release files
         shell: bash
         run: |
           mkdir -p release-files
-          for platform in linux windows macos; do
-            if [ "$platform" = "windows" ]; then
-              src=$(find release-artifacts/$platform -name '*.exe' -type f | head -1)
-              if [ -n "$src" ]; then
-                cp "$src" release-files/Instrumentarium.exe
-              fi
-            elif [ "$platform" = "macos" ]; then
-              app=$(find release-artifacts/$platform -name 'Instrumentarium.app' -type d | head -1)
-              if [ -n "$app" ]; then
-                cd "$(dirname "$app")"
-                tar czf ../../release-files/Instrumentarium-macos.tar.gz "$(basename "$app")"
-                cd -
-              else
-                src=$(find release-artifacts/$platform -name 'Instrumentarium' -type f | head -1)
-                if [ -n "$src" ]; then
-                  cd "$(dirname "$src")"
-                  tar czf ../../release-files/Instrumentarium-macos.tar.gz "$(basename "$src")"
-                  cd -
-                fi
-              fi
-            else
-              src=$(find release-artifacts/$platform -name 'Instrumentarium' -type f | head -1)
-              if [ -n "$src" ]; then
-                cp "$src" release-files/Instrumentarium-linux
-              fi
+          # Windows
+          src=$(find release-artifacts -name 'Instrumentarium.exe' -type f | head -1)
+          if [ -n "$src" ]; then
+            cp "$src" release-files/Instrumentarium.exe
+          fi
+          # macOS
+          app=$(find release-artifacts -name 'Instrumentarium.app' -type d | head -1)
+          if [ -n "$app" ]; then
+            cd "$(dirname "$app")"
+            tar czf ../../release-files/Instrumentarium-macos.tar.gz "$(basename "$app")"
+            cd -
+          else
+            src=$(find release-artifacts -name 'Instrumentarium' -type f | head -1)
+            if [ -n "$src" ]; then
+              cd "$(dirname "$src")"
+              tar czf ../../release-files/Instrumentarium-macos.tar.gz "$(basename "$src")"
+              cd -
             fi
-          done
+          fi
+          # Linux
+          src=$(find release-artifacts -name 'Instrumentarium' -type f ! -path '*/macos/*' | head -1)
+          if [ -n "$src" ]; then
+            cp "$src" release-files/Instrumentarium-linux
+          fi
           ls -la release-files/
 
       - name: Create Release
