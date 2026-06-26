@@ -276,7 +276,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not j:
                 self._json({"error": "Job not found", "status": "error"})
                 return
-            self._json({"lines": j["log"][off:], "status": j["status"]})
+            self._json({
+                "lines": j["log"][off:],
+                "status": j["status"],
+                "speed": j.get("speed"),
+                "filesize": j.get("filesize"),
+                "stall_warning": j.get("stall_warning"),
+            })
             return
 
         if p.path == "/probe":

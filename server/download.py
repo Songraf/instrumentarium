@@ -10,7 +10,7 @@ import threading
 import time
 
 from .state import state
-from .utils import detect_platform, human_size, parse_speed, popen_no_console as _popen, find_ffmpeg as _find_ffmpeg
+from .utils import detect_platform, human_size, parse_speed, parse_size, popen_no_console as _popen, find_ffmpeg as _find_ffmpeg
 
 log = logging.getLogger("instrumentarium.server.download")
 
@@ -223,14 +223,16 @@ class JobLogger(threading.Thread):
                 if "[download]" in line and " at " in line and "%" in line and " of " in line:
                     try:
                         size_str = line.split(" of ")[1].split(" at ")[0].strip()
-                        j["filesize"] = parse_speed(size_str)
-                    except (IndexError, ValueError):
-                        pass
+                        j["filesize"] = parse_size(size_str)
+                        log.debug("parsed filesize: %d from '%s'", j["filesize"], size_str)
+                    except (IndexError, ValueError) as e:
+                        log.debug("parse_size error: %s", e)
                     try:
-                        speed_str = line.split(" at ")[1].split(" ")[0]
+                        speed_str = line.split(" at ")[1].split()[0]
                         j["speed"] = parse_speed(speed_str)
-                    except (IndexError, ValueError):
-                        pass
+                        log.debug("parsed speed: %d from '%s'", j["speed"], speed_str)
+                    except (IndexError, ValueError) as e:
+                        log.debug("parse_speed error: %s", e)
 
             proc.wait()
             if proc.returncode == 0:

@@ -57,7 +57,38 @@ def human_size(n):
 
 # ── Speed parsing ──────────────────────────────────────────────────────
 
-_SPEED_MULT = {'B': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3}
+_SPEED_MULT = {'B': 1, 'K': 1024, 'M': 1024**2, 'G': 1024**3,
+               'KB': 1024, 'MB': 1024**2, 'GB': 1024**3,
+               'KIB': 1024, 'MIB': 1024**2, 'GIB': 1024**3}
+
+
+def parse_size(s):
+    """Parse size string like '~ 979.50MiB' or '979.50MiB' into bytes.
+
+    Args:
+        s: Size string from yt-dlp progress output (may include '~' prefix).
+
+    Returns:
+        Size in bytes (int), or 0 if parsing fails.
+    """
+    s = s.strip().lstrip('~').strip()
+    s_upper = s.upper()
+    # Sort suffixes by length descending so 'MIB' matches before 'MB' before 'B'
+    for suffix in sorted(_SPEED_MULT.keys(), key=len, reverse=True):
+        if s_upper.endswith(suffix):
+            try:
+                num_part = s_upper[:-len(suffix)]
+                return int(float(num_part) * _SPEED_MULT[suffix])
+            except ValueError:
+                pass
+    # Fallback: try to extract leading number
+    num = ''
+    for ch in s:
+        if ch.isdigit() or ch == '.':
+            num += ch
+        else:
+            break
+    return int(float(num)) if num else 0
 
 
 def parse_speed(s):
@@ -70,13 +101,16 @@ def parse_speed(s):
         Speed in bytes per second (float).
     """
     s = s.strip()
-    for suffix, m in _SPEED_MULT.items():
-        s_upper = s.upper()
-        if s_upper.endswith(suffix + '/S') or s_upper.endswith(suffix + 'IB/S'):
-            try:
-                return float(s_upper.split(suffix.upper())[0].rstrip('I')) * m
-            except ValueError:
-                pass
+    s_upper = s.upper()
+    # Sort suffixes by length descending so 'MIB/S' matches before 'MB/S' before 'B/S'
+    for suffix in sorted(_SPEED_MULT.keys(), key=len, reverse=True):
+        for speed_suf in [suffix + '/S', suffix + 'B/S']:
+            if s_upper.endswith(speed_suf):
+                try:
+                    num_part = s_upper[:-len(speed_suf)]
+                    return float(num_part) * _SPEED_MULT[suffix]
+                except ValueError:
+                    pass
     # Fallback: try to extract leading number
     num = ''
     for ch in s:

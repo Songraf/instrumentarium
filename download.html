@@ -523,8 +523,8 @@ let currentDuration = 0;
 
 // ── Client-side size cache ───────────────────────────────────────
 // Persists across mode switches (video ↔ audio) and re-probes of same URL
-let _probeSizeCache = {};   // {url: {filesize: int, duration: float}}
-let _probeUrl = null;
+window._probeSizeCache = {};   // {url: {filesize: int, duration: float}}
+window._probeUrl = null;
 let _downloadActive = false;  // true while a download is in progress
 let currentDlJobId = null;    // job_id of active download (for cancel)
 
@@ -590,6 +590,7 @@ function doProbe(url) {
         return resp.json();
       })
       .then(data => {
+        console.log('probe response:', JSON.stringify(data).substring(0, 200));
         if (!data) return;
         if (data.error) {
           showError(data.error, null);
@@ -622,6 +623,7 @@ function doProbe(url) {
       .catch(err => {
         clearTimeout(timeoutId);
         hideProbing();
+        console.error('probe fetch error:', err.message, err.name);
         if (err.name === 'AbortError') {
           showError('Ошибка', 'Таймаут проверки ссылки (30с)');
         } else {
@@ -772,7 +774,7 @@ function renderResButtons() {
       const btn = document.createElement('button');
       btn.className = 'res-btn';
       const abrStr = af.abr > 0 ? `${Math.round(af.abr)}kbps` : '';
-      const sizeStr = (af.filesize && af.filesize > 0) ? _human(af.filesize) : '';
+      const sizeStr = (af.filesize && af.filesize > 0) ? '~' + _human(af.filesize) : '';
       const sizeClass = (af.filesize && af.filesize > 0) ? '' : 'size-loading';
       const initialSize = sizeStr || 'Определяю…';
       btn.dataset.formatId = af.format_id;
@@ -823,9 +825,9 @@ function renderResButtons() {
     btn.className = 'res-btn';
     const rawLabel = best.display_label || (best.height + 'p');
     const resLabel = (rawLabel && rawLabel !== "0" && rawLabel !== "0p") ? rawLabel : "Скачать видео";
-    // Show filesize from /probe immediately; use probe-meta to refine
+    // Show filesize from /probe immediately (marked as estimated); probe-meta refines it
     const hasProbeSize = best.filesize && best.filesize > 0;
-    const probeSizeStr = hasProbeSize ? _human(best.filesize) : '';
+    const probeSizeStr = hasProbeSize ? '~' + _human(best.filesize) : '';
     const probeSizeClass = hasProbeSize ? '' : 'size-loading';
     const initialSize = probeSizeStr || 'Определяю…';
     btn.dataset.formatId = best.format_id;
@@ -1082,7 +1084,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
     if (data.error) { showError('Ошибка', data.error); enableDlButtons(); _downloadActive = false; return; }
     if (data.deps_ready) {
       document.getElementById('dlStatusLeft').textContent = '✅ Зависимости готовы, запуск…';
-      setTimeout(() => { enableDlButtons(); _startDownload(url, dlMode, formatId, height); }, 500);
+      setTimeout(() => { _startDownload(url, dlMode, formatId, height); }, 500);
       return;
     }
     currentDlJobId = data.job_id;
@@ -1164,6 +1166,19 @@ function enableDlButtons() {
 function cancelDownload() {
   if (!currentDlJobId) return;
   fetch('/cancel?job_id=' + encodeURIComponent(currentDlJobId), { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok || d.message) {
+        // Immediately reset UI
+        _downloadActive = false;
+        if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
+        document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
+        document.getElementById('dlBar').style.width = '0%';
+        document.getElementById('dlBar').classList.remove('done');
+        document.getElementById('dlStatusRight').textContent = '';
+        enableDlButtons();
+      }
+    })
     .catch(() => {});
 }
 
