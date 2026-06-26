@@ -16,7 +16,7 @@
     align-items: center;
     justify-content: center;
     overflow-y: auto;
-    padding: 16px 0;
+    padding: 16px 0 72px 0;
   }
 
   /* ── Card ─────────────────────────────────────────────────── */
@@ -102,6 +102,7 @@
 
   .progress-section { margin-top: 24px; text-align: left; }
   .progress-bg { background: #0a0a1a; border-radius: 8px; height: 6px; overflow: hidden; }
+  .progress-bg.tall { height: 28px; border-radius: 14px; }
   .progress-bar {
     height: 100%; width: 0%;
     background: linear-gradient(90deg, #e056a0, #a78bfa, #e056a0);
@@ -226,18 +227,23 @@
     background: rgba(255,255,255,.15); border-radius: 6px; padding: 2px 8px; font-size: .65rem;
   }
 
-  /* ── Downloads button ─────────────────────────────────────── */
+  /* ── Downloads button (floating square, bottom-right) ──────── */
   .big-downloads-btn {
-    width: 100%; padding: 13px; margin-top: 14px;
-    background: linear-gradient(135deg, rgba(108,92,231,.15), rgba(167,139,250,.1));
-    border: 1px solid rgba(108,92,231,.25); border-radius: 12px; color: #a78bfa;
-    font-size: .9rem; font-weight: 700; cursor: pointer;
-    transition: all .2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+    position: fixed; bottom: 20px; right: 20px;
+    width: 48px; height: 48px; padding: 0;
+    background: linear-gradient(135deg, rgba(108,92,231,.2), rgba(167,139,250,.15));
+    border: 1px solid rgba(108,92,231,.3); border-radius: 12px;
+    color: #a78bfa; font-size: 1.4rem; cursor: pointer;
+    transition: all .2s;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 20px rgba(0,0,0,.4);
+    z-index: 100;
   }
   .big-downloads-btn:hover {
-    background: linear-gradient(135deg, rgba(108,92,231,.25), rgba(167,139,250,.15));
-    border-color: rgba(108,92,231,.4);
-    transform: translateY(-1px);
+    background: linear-gradient(135deg, rgba(108,92,231,.35), rgba(167,139,250,.25));
+    border-color: rgba(108,92,231,.5);
+    transform: scale(1.08);
+    box-shadow: 0 6px 24px rgba(108,92,231,.3);
   }
 
   .dl-progress { margin-top: 12px; transition: opacity .4s ease; }
@@ -422,7 +428,7 @@
     </div>
 
     <div class="dl-progress" id="dlProgress" style="display:none">
-      <div class="progress-bg"><div class="progress-bar" id="dlBar"><span class="pct-text" id="pctText"></span></div></div>
+      <div class="progress-bg tall"><div class="progress-bar" id="dlBar"><span class="pct-text" id="pctText"></span></div></div>
       <div class="dl-status">
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
@@ -437,8 +443,8 @@
       </div>
     </div>
 
-    <button class="big-downloads-btn" onclick="openFolder()">
-      ⬇️ Загрузки
+    <button class="big-downloads-btn" onclick="openFolder()" title="Открыть папку загрузок">
+      📁
     </button>
 
     <p class="footer">
