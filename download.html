@@ -1190,6 +1190,7 @@ function startDownloadBestAudio() {
 
 function _startDownload(url, dlMode, formatId, height, acodec) {
   _downloadActive = true;
+  _cancelHandled = false;
   document.getElementById('dlProgress').style.display = 'block';
   document.getElementById('dlProgress').classList.add('fade-in');
   document.getElementById('cancelArea').style.display = '';
@@ -1230,6 +1231,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
       fetch('/log?job=' + data.job_id + '&offset=' + offset)
         .then(r => r.json())
         .then(d => {
+          console.log('[POLL] status=' + d.status + ' cancelled=' + d.cancelled + ' _cancelHandled=' + _cancelHandled);
           if (d.lines) {
             if (d.speed != null) {
               document.getElementById('dlStatusRight').textContent = _humanSpeed(d.speed);
@@ -1249,7 +1251,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             _downloadActive = false;
             document.getElementById('pctText').textContent = '';
             document.getElementById('dlStatusRight').textContent = '';
-            if (d.cancelled) {
+            if (d.cancelled && !_cancelHandled) {
               // Keep bar at current position, turn red briefly, then fade
               var _bar = document.getElementById('dlBar');
               _bar.style.background = '#ff4757';
@@ -1320,32 +1322,50 @@ function _humanSpeed(bytesPerSec) {
 }
 
 function cancelDownload() {
-  console.log('[CANCEL] cancelDownload() called');
-  var xhr = new XMLHttpRequest();
-  xhr.open('POST', '/cancel', true);
-  xhr.setRequestHeader('Content-Type', 'application/json');
-  xhr.onreadystatechange = function() {
-    console.log('[CANCEL] readyState=' + xhr.readyState + ' status=' + xhr.status);
-    if (xhr.readyState === 4) {
-      console.log('[CANCEL] response: ' + xhr.responseText);
-      var d = {};
-      try { d = JSON.parse(xhr.responseText); } catch(e) { console.error('[CANCEL] parse error: ' + e); }
-      if (d.ok || d.message) {
-        _downloadActive = false;
-        document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
-        document.getElementById('dlStatusRight').textContent = '';
-        document.getElementById('dlBar').style.width = '0%';
-        document.getElementById('dlBar').classList.remove('done');
-        document.getElementById('pctText').textContent = '';
-        enableDlButtons();
-        document.getElementById('cancelArea').style.display = 'none';
-        enableUrlInput();
-        console.log('[CANCEL] UI updated');
-      }
-    }
-  };
-  xhr.onerror = function() { console.error('[CANCEL] XHR error'); };
-  xhr.send('{}');
+  console.log('[CANCEL] cancelDownload() called, _cancelHandled=' + _cancelHandled);
+  if (_cancelHandled) { console.log('[CANCEL] already handled, skip'); return; }
+  // Use fetch with keep-alive disabled to avoid connection reuse issues in WebView2
+  console.log('[CANCEL] sending POST /cancel...');
+  fetch('/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+    cache: 'no-store',
+    credentials: 'omit'
+  })
+  .then(function(r) {
+    console.log('[CANCEL] fetch status=' + r.status + ' statusText=' + r.statusText);
+    return r.text();
+  })
+  .then(function(text) {
+    console.log('[CANCEL] fetch response: "' + text + '"');
+    var d = {};
+    try { d = JSON.parse(text); } catch(e) { console.error('[CANCEL] parse error: ' + e); }
+    _applyCancelUI();
+  })
+  .catch(function(err) {
+    console.error('[CANCEL] fetch error: ' + err);
+    // Even if fetch fails, apply UI changes (server may have killed the process)
+    _applyCancelUI();
+  });
+}
+
+function _applyCancelUI() {
+  console.log('[CANCEL] _applyCancelUI() called, _cancelHandled=' + _cancelHandled);
+  if (_cancelHandled) { console.log('[CANCEL] already handled, skip'); return; }
+  _downloadActive = false;
+  _cancelHandled = true;
+  clearInterval(dlPoll);
+  dlPoll = null;
+  document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
+  document.getElementById('dlStatusRight').textContent = '';
+  document.getElementById('dlBar').style.width = '0%';
+  document.getElementById('dlBar').classList.remove('done');
+  document.getElementById('pctText').textContent = '';
+  enableDlButtons();
+  document.getElementById('cancelArea').style.display = 'none';
+  enableUrlInput();
+  console.log('[CANCEL] UI updated');
 }
 /* ── Cookies dialog ─────────────────────────────────────── */
 function showCookiesDialog() {
