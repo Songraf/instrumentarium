@@ -1,7 +1,7 @@
 # INSTRUMENTARIUM — Техническое описание и спецификация
 
-*Версия документа: 2026-06-25*
-*Статус: Активная разработка (v1.2.0)*
+*Версия документа: 2026-06-27*
+*Статус: Активная разработка (v0.1.0, ветка v0.1.0)*
 
 ---
 
@@ -66,7 +66,7 @@
 | DW-09 | Прогресс загрузки | Прогресс-бар с реальным процентом из yt-dlp output |
 | DW-10 | Уведомление об ошибке | Toast с описанием ошибки + hint "Подробности в instrumentarium.log" |
 | DW-11 | Открытие папки | Кнопка "📁 Загрузки" → открытие папки downloads в файловом менеджере |
-| DW-12 | Отмена загрузки | Кнопка "⛔ Отмена" → `GET /cancel` → kill active subprocess |
+|| DW-12 | Отмена загрузки | Кнопка "✕ Остановить" → `POST /cancel` → kill process tree (taskkill на Windows, killpg на Linux/macOS) + очистка .part/.ytdl файлов. Кнопка скрыта по умолчанию, появляется только при активной загрузке. После отмены: плавное исчезновение прогресс-бара через 2 сек. |
 | DW-13 | Ограничение имени | Длина имени файла ограничена 120 символами для совместимости с Windows |
 
 ### 2.3. Скачивание аудио
@@ -179,15 +179,17 @@ Cleanup Thread (daemon)
 
 ### 4.3. Ключевые решения
 
+- **fetch() API** — для /cancel запроса (совместимость с WebView2/pywebview)
 - **ThreadingHTTPServer** — многопоточный HTTP-сервер (не блокируется на медленных запросах)
 - **Rate limiting** — token bucket для /probe и /download
 - **CORS headers** — все JSON-ответы включают `Access-Control-Allow-Origin: *`
 - **Path traversal protection** — валидация путей через `os.path.realpath()`
 - **Thread-safe AppState** — все атрибуты защищены `threading.Lock`
 - **TTL cleanup** — автоматическая очистка старых jobs каждые 5 минут
-- **XMLHttpRequest** — вместо fetch для совместимости с pywebview
 - **Экспоненциальный бэк-офф** — probe-meta polling: 1s, 2s, 4s, 8s... до 16s
 - **Реальный прогресс-бар** — парсинг процента из yt-dlp output
+- **Popen с CREATE_NEW_PROCESS_GROUP** — для убийства дерева процессов на Windows
+- **taskkill /F /T** — убийство process tree на Windows
 
 ---
 
@@ -202,9 +204,10 @@ Cleanup Thread (daemon)
 | GET | `/probe?url=URL` | JSON: {title, duration, thumbnail, formats, audio_formats} |
 | GET | `/probe-meta?url=URL&format_id=ID&duration=N` | JSON: {job_id} |
 | GET | `/probe-meta-status?id=ID` | JSON: {status, filesize, probe_duration} |
-| GET | `/log?job=ID&offset=N` | JSON: {lines, status} |
+| GET | `/log?job=ID&offset=N` | JSON: {lines, status, speed, filesize, downloaded_bytes, cancelled, stall_warning} |
 | GET | `/open-folder` | Открывает папку downloads |
-| GET | `/cancel` | Отмена активной загрузки |
+| GET | `/cancel` | Отмена активной загрузки (legacy) |
+| POST | `/cancel` | Отмена активной загрузки + очистка .part/.ytdl |
 | POST | `/setup` | Запускает setup wizard |
 | POST | `/download` | Запускает скачивание {url, mode, format_id} |
 | POST | `/cookies` | Сохранить/очистить cookies |
@@ -272,18 +275,19 @@ Cleanup Thread (daemon)
 
 **Download Screen** (основной):
 - Заголовок "🎬 Video Downloader"
-- Поле ввода URL с валидацией
+- Поле ввода URL с валидацией (блокируется во время загрузки)
 - Бейдж платформы
-- Переключатель 🎥 Видео / 🎵 Аудио
+- Переключатель 🎥 Видео / 🎵 Аудио (блокируется во время загрузки)
 - Динамические кнопки разрешений/аудио
 - Прогресс-бар загрузки (реальный процент)
 - Toast для ошибок
-- Кнопки "📁 Загрузки" и "⛔ Отмена"
+- Кнопка "✕ Остановить" (скрыта по умолчанию, появляется при загрузке, исчезает через 2 сек после отмены с fade-out)
+- Footer: v0.1.0 (слева), 🍪 Cookies ? (центр), 📁 Загрузки (справа)
 
 ### 6.2. Размер окна
 
 - **Размер:** 620×720 пикселей
-- **Resizable:** Нет (фиксированный размер)
+- **Resizable:** Да (можно изменять размер)
 - **Скролл:** Контент скроллится если не помещается
 
 ### 6.3. Цветовая схема
@@ -412,7 +416,18 @@ pyinstaller video-downloader.spec --clean
 | L-05 | Нет прокси | Прокси не поддерживается |
 | L-06 | Нет выбора формата аудио | Только MP3 |
 
-### 9.2. Планы
+### 9.2. Текущая ветка: v0.1.0 (2026-06-27)
+
+**Решено:**
+- ✅ Отмена загрузки с убийством process tree
+- ✅ Блокировка URL-поля и кнопок режимов во время загрузки
+- ✅ Плавное исчезновение прогресс-бара после отмены
+- ✅ Debug-консоль (F12) для диагностики
+- ✅ Убийство process tree на Windows (taskkill /F /T /PID)
+
+**Текущая версия:** v0.1.0 (branch `v0.1.0`)
+
+### 9.3. Планы
 
 | # | План | Приоритет |
 |---|------|-----------|
@@ -420,10 +435,6 @@ pyinstaller video-downloader.spec --clean
 | P-02 | Выбор папки сохранения | Средний |
 | P-03 | Пауза/возобновление | Низкий |
 | P-04 | Tauri-рефакторинг | Низкий (долгосрочно) |
-
----
-
-## Приложения
 
 ### A. Структура Git-репозитория
 

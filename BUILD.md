@@ -1,6 +1,7 @@
 # INSTRUMENTARIUM — Build & Architecture Reference
 
-*Версия документа: 2026-06-26*
+*Версия документа: 2026-06-27*
+*Текущая ветка: v0.1.0*
 *Этот документ — полное описание архитектуры, файлов, потоков данных и поведения приложения. Читать при начале любой новой сессии работы.*
 
 ---
@@ -133,7 +134,7 @@ app.py (main thread)
   ├── 6. Ожидание готовности сервера (max 5s, polling 127.0.0.1:18765)
   │
   └── 7. Открытие окна pywebview:
-          Размер: 620×720, resizable=False
+          Размер: 620×720, resizable=True
           Windows: edgechromium → auto-detect (CEF удалён для уменьшения размера билда)
           Linux:   auto-detect (GTK/Qt)
           macOS:   auto-detect (Cocoa)
@@ -176,7 +177,8 @@ server_main.py (импортируется как модуль из app.py)
   │     GET  /probe-meta-status → JSON {status, filesize}
   │     GET  /log           → JSON {lines, status}
   │     GET  /open-folder   → открыть папку downloads
-  │     GET  /cancel        → kill active download
+  | GET  /cancel        → kill active download (legacy, use POST) |
+  | POST /cancel        → kill active download + cleanup .part/.ytdl files |
   │     POST /setup         → запустить setup wizard
   │     POST /download      → запустить скачивание (rate limited)
   │     POST /cookies       → сохранить/очистить cookies (с валидацией)
@@ -279,7 +281,15 @@ Cleanup Thread (daemon, server_main.py → _cleanup_worker)
 - Linux: `xdg-open <path>`
 
 ### GET /cancel
-Убивает активный yt-dlp subprocess, помечает все running jobs как cancelled.
+Убивает активный yt-dlp subprocess (legacy, используйте POST).
+
+### POST /cancel
+Убивает активный yt-dlp subprocess и все дочерние процессы (ffmpeg, aria2c):
+- Windows: `taskkill /F /T /PID` (убивает дерево процессов)
+- Linux/macOS: `os.killpg(SIGKILL)` (убивает process group)
+- Очищает `.part`, `.ytdl` файлы из папки загрузок
+- Помечает job как `cancelled: true`
+- Возвращает `{"ok": true, "message": "Download cancelled"}`
 
 ### POST /setup
 Запускает setup wizard. Если уже настроено — возвращает `{"already_done": true}`.
@@ -604,8 +614,8 @@ python -m pytest tests/ -v
 
 ## 11. Известные ограничения и планы
 
-### ✅ Решено (2026-06-09)
-- Нативное окно приложения (pywebview + CEF fallback)
+### ✅ Решено (v0.1.0, 2026-06-27)
+- Нативное окно приложения (pywebview + edgechromium)
 - Портативность: всё в одной папке с .exe (не AppData)
 - Setup wizard не появляется при повторном запуске (.setup_done)
 - Закрытие без зависания (daemon thread + /shutdown endpoint)
@@ -615,35 +625,40 @@ python -m pytest tests/ -v
 - FFmpeg auto-install (Windows, BtbN builds)
 - Нет консольных окон на Windows (CREATE_NO_WINDOW, devnull stdout)
 - CI/CD для всех трёх платформ
-- 57 тестов, все проходят
+- 58 тестов, все проходят
 - Lock-файл (один инстанс)
 - LinkedIn видео: поддержка vcodec=None, video_ext=mp4
 - Аудио дорожка: +bestaudio/best в формате скачивания
 - Аудио UI: битрейт + размер на кнопках
-- Фиксированный размер окна (620×720, resizable=False)
-- Фиксированная позиция кнопки "Загрузки" (min-height на dl-options)
+- Переменный размер окна (resizable=True)
 - Вертикальные видео (Shorts): корректное отображение разрешения
 - Cookies система: drag & drop / вставка cookies.txt, LinkedIn авторизация
 - ?-тултипы: JS onmouseenter/onmouseleave (CSS hover не работает в pywebview)
 - Визуальный фидбек кнопок: scale(.96) при :active, блокировка во время запроса
-- Маппинг ошибок yt-dlp: `_map_ytdlp_error()` — Unsupported URL, private video, 404, geo-blocked, rate-limited, network errors → понятные сообщения на русском
-- Оптимизация Windows-сборки: удалён CEF (~100+ MB меньше), убраны sleep(0.5) при shutdown → быстрый запуск и закрытие
-- CI артефакты: переименованы в linux/windows/macos-instrumentarium
+- Маппинг ошибок yt-dlp: `_map_ytdlp_error()` → понятные сообщения на русском
+- Оптимизация Windows-сборки: удалён CEF (~100+ MB меньше)
 - **Размеры файлов на кнопках** — показываются сразу из /probe
-- **Асинхронный probe-meta** — не блокирует сервер
+- **Асинхронный probe-meta** — не блокирует сервер, кэшируется по (url, format_id)
 - **ThreadingHTTPServer** — многопоточный HTTP-сервер
 - **Rate limiting** — защита от злоупотреблений
 - **CORS headers** — совместимость с разными origin
 - **Path traversal protection** — безопасность
 - **Thread-safe AppState** — потокобезопасность
 - **TTL cleanup** — автоматическая очистка старых jobs
-- **XMLHttpRequest** — вместо fetch для совместимости с pywebview
-- **Экспоненциальный бэк-офф** — probe-meta polling: 1s, 2s, 4s, 8s... до 16s
+- **fetch() API** — вместо XMLHttpRequest для /cancel (совместимость с WebView2)
 - **Реальный прогресс-бар** — парсинг процента из yt-dlp output
-- **Отмена загрузки** — /cancel endpoint
+- **Отмена загрузки** — POST /cancel с убийством process tree (taskkill на Windows)
+- **Очистка .part/.ytdl** — удаление незавершённых файлов при отмене
+- **Блокировка URL-поля** — отключается во время загрузки
+- **~ для примерного размера** — знак тильды когда размер определён неточно
+- **Debug-панель (F12)** — перехват console.log/error/warn для диагностики
+- **Плавное исчезновение прогресса** — fade-out через 2 сек после отмены
+- **Блокировка переключения режимов** — кнопки Видео/Аудио отключаются во время загрузки
 - **Валидация cookies** — проверка формата и размера
 - **Интеграционные тесты** — 21 тест для HTTP endpoints
 - **Рефакторинг** — разделение на server/ подпакет
+- **Footer layout** — v0.1.0 слева, 🍪 Cookies по центру, 📁 Загрузки справа
+- **Cookie tooltip** — кнопка ? с инструкцией при наведении
 
 ### ⬜ Планы/в работе
 - Расширить тесты: HTTP-эндпоинты, JobLogger
@@ -651,4 +666,4 @@ python -m pytest tests/ -v
 
 ---
 
-*Последнее обновление: 2026-06-25*
+*Последнее обновление: 2026-06-27*
