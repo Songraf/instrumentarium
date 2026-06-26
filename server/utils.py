@@ -17,6 +17,7 @@ PLATFORM_DOMAINS = [
     ("instagram", ["instagram.com"]),
     ("facebook", ["facebook.com", "fb.com", "fb.watch"]),
     ("linkedin", ["linkedin.com"]),
+    ("yandex", ["disk.yandex.ru", "yandex.ru"]),
 ]
 
 
@@ -27,14 +28,23 @@ def detect_platform(url):
         url: Video URL string.
 
     Returns:
-        Platform name string (youtube, twitter, tiktok, instagram, facebook, linkedin, other).
+        Platform name string (youtube, twitter, tiktok, etc., or domain name).
     """
+    from urllib.parse import urlparse
     u = url.lower()
     for name, domains in PLATFORM_DOMAINS:
         for d in domains:
             if d in u:
                 return name
-    return "other"
+    # Fallback: extract domain name as platform
+    try:
+        host = urlparse(url).netloc.lower()
+        # Remove 'www.' prefix and return first part of domain
+        if host.startswith("www."):
+            host = host[4:]
+        return host.split(".")[0] if host else "other"
+    except Exception:
+        return "other"
 
 
 # ── File size formatting ───────────────────────────────────────────────

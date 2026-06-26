@@ -44,10 +44,13 @@ def test_detect_platform_linkedin():
     assert detect_platform("https://linkedin.com/posts/xyz") == "linkedin"
 
 
-def test_detect_platform_other():
+def test_detect_platform_fallback():
     from server import detect_platform
-    assert detect_platform("https://vimeo.com/123") == "other"
-    assert detect_platform("https://example.com/video") == "other"
+    assert detect_platform("https://vimeo.com/123") == "vimeo"
+    assert detect_platform("https://disk.yandex.ru/i/xxx") == "yandex"
+    assert detect_platform("https://rutube.ru/video/xxx") == "rutube"
+    assert detect_platform("https://example.com/video.mp4") == "example"
+    assert detect_platform("") == "other"
 
 
 def test_detect_platform_case_insensitive():
