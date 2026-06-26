@@ -454,8 +454,8 @@
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
       </div>
-      <div style="text-align:center;margin-top:8px;position:relative;z-index:20;">
-        <button id="cancelBtn" style="position:relative;z-index:999;pointer-events:auto;padding:10px 24px;background:rgba(255,71,87,.2);border:2px solid rgba(255,71,87,.5);border-radius:12px;color:#ff6b6b;cursor:pointer;font-size:.85rem;font-weight:700;transition:all .2s;">✕ Остановить</button>
+      <div style="text-align:center;margin-top:8px;">
+        <button id="cancelBtn" type="button" style="padding:10px 24px;background:rgba(255,71,87,.2);border:2px solid rgba(255,71,87,.5);border-radius:12px;color:#ff6b6b;cursor:pointer;font-size:.85rem;font-weight:700;transition:all .2s;">✕ Остановить</button>
       </div>
       <div class="error-toast" id="errorToast">
         <div class="title" id="errorTitle">❌ Ошибка</div>
@@ -566,6 +566,26 @@ let currentDuration = 0;
 // Persists across mode switches (video ↔ audio) and re-probes of same URL
 window._probeSizeCache = {};   // {url: {filesize: int, duration: float}}
 window._probeUrl = null;
+/* ── UI state helpers ── */
+function enableUrlInput() {
+  var inp = document.getElementById('urlInput');
+  inp.disabled = false;
+  inp.style.opacity = '';
+  inp.style.cursor = '';
+}
+function disableUrlInput() {
+  var inp = document.getElementById('urlInput');
+  inp.disabled = true;
+  inp.style.opacity = '0.5';
+  inp.style.cursor = 'not-allowed';
+}
+function enableDlButtons() {
+  document.querySelectorAll('.res-btn').forEach(b => b.disabled = false);
+  document.getElementById('optVideo').classList.remove('dl-disabled');
+  document.getElementById('optAudio').classList.remove('dl-disabled');
+  enableUrlInput();
+}
+
 let _downloadActive = false;  // true while a download is in progress
 let currentDlJobId = null;    // job_id of active download (for cancel)
 
@@ -976,16 +996,22 @@ fetch('/status').then(r => r.json()).then(d => {
   downloadScreen.style.display = 'none';
 });
 
-/* ── Bind cancel button (addEventListener for pywebview compat) ── */
-document.addEventListener('DOMContentLoaded', function() {
-  var _cancelBtn = document.getElementById('cancelBtn');
-  if (_cancelBtn) {
-    _cancelBtn.addEventListener('click', function(e) {
-      e.preventDefault();
-      cancelDownload();
-    });
+/* ── Bind cancel button ── */
+(function() {
+  var _cancelFired = false;
+  var btn = document.getElementById('cancelBtn');
+  function _doCancel() {
+    if (_cancelFired) return;
+    _cancelFired = true;
+    cancelDownload();
+    setTimeout(function() { _cancelFired = false; }, 1000);
   }
-});
+  if (btn) {
+    btn.onclick = _doCancel;
+    btn.addEventListener('click', _doCancel);
+    btn.addEventListener('touchend', _doCancel);
+  }
+})();
 
 /* ── Setup wizard ─────────────────────────────────────────── */
 function startSetup() {
@@ -1115,6 +1141,8 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
   _downloadActive = true;
   document.getElementById('dlProgress').style.display = 'block';
   document.getElementById('dlProgress').classList.add('fade-in');
+  // Disable URL input during download
+  disableUrlInput();
   hideError();
   const dlBar = document.getElementById('dlBar');
   dlBar.style.width = '5%';
@@ -1192,7 +1220,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             }
             if (!d.cancelled && d.status === 'done') {
               document.getElementById('dlStatusLeft').textContent = '✅ Готово!';
-            } else {
+            } else if (!d.cancelled) {
               document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки';
             }
             enableDlButtons();
@@ -1235,12 +1263,6 @@ function _humanSpeed(bytesPerSec) {
   let val = bytesPerSec;
   while (val >= 1024 && unitIdx < units.length - 1) { val /= 1024; unitIdx++; }
   return val.toFixed(val >= 100 ? 0 : 2) + ' ' + units[unitIdx];
-}
-
-function enableDlButtons() {
-  document.querySelectorAll('.res-btn').forEach(b => b.disabled = false);
-  document.getElementById('optVideo').classList.remove('dl-disabled');
-  document.getElementById('optAudio').classList.remove('dl-disabled');
 }
 
 function cancelDownload() {
