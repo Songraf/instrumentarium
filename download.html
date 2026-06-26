@@ -525,8 +525,6 @@ let currentDuration = 0;
 // Persists across mode switches (video ↔ audio) and re-probes of same URL
 let _probeSizeCache = {};   // {url: {filesize: int, duration: float}}
 let _probeUrl = null;
-let currentUrl = '';
-let currentDuration = 0;
 let _downloadActive = false;  // true while a download is in progress
 let currentDlJobId = null;    // job_id of active download (for cancel)
 
