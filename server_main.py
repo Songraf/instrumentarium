@@ -307,7 +307,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_error(404)
 
     def do_POST(self):
-        if self.path == "/setup":
+        p = urlparse(self.path)
+        if p.path == "/setup":
             if state.setup_phase == "done" and os.path.exists(SETUP_MARKER):
                 self._json({"ok": True, "already_done": True})
                 return
@@ -323,6 +324,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         if self.path == "/download":
             self._handle_download()
+            return
+
+        if self.path == "/cancel":
+            self._handle_cancel()
             return
 
         if self.path == "/shutdown":
@@ -514,6 +519,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 "duration": cached.get("duration", 0),
                 "job_id": "cached",
                 "probe_duration": cached.get("duration", 0),
+                "estimated": cached.get("estimated", False),
                 "status": "done",
             })
             return
@@ -604,7 +610,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "URL is required"})
             return
         jid = str(uuid.uuid4())[:8]
-        download_jobs[jid] = {"log": [], "status": "running"}
+        download_jobs[jid] = {"log": [], "status": "running", "_partial_filepath": None}
         yt = _find_ytdlp()
         if not yt:
             self._json({"error": "yt-dlp not found — run setup first"})
@@ -613,14 +619,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self._json({"job_id": jid, "platform": detect_platform(url)})
 
     def _handle_cancel(self):
-        """Handle /cancel endpoint — kill active download."""
+        """Handle /cancel endpoint — kill active download and clean up partial files."""
+        qs = parse_qs(urlparse(self.path).query)
+        req_job_id = qs.get("job_id", [None])[0]
         killed = state.kill_active_proc()
-        if killed:
-            # Mark all running jobs as cancelled
-            for jid, job in download_jobs.items():
-                if job.get("status") == "running":
-                    job["status"] = "error"
-                    job["log"].append("[cancelled] Download cancelled by user")
+        # Find the job to clean up
+        job = None
+        jid = None
+        for j, jobj in download_jobs.items():
+            if req_job_id is None or j == req_job_id:
+                if jobj.get("status") == "running":
+                    job = jobj
+                    jid = j
+                    break
+        # Mark job as cancelled
+        if job:
+            job["status"] = "error"
+            job["log"].append("[cancelled] Download cancelled by user")
+            # Remove partial/incomplete file if known
+            filepath = job.get("filepath") or job.get("_partial_filepath")
+            if filepath and os.path.exists(filepath):
+                try:
+                    os.remove(filepath)
+                    log.info("/cancel: removed partial file %s", filepath)
+                except OSError as e:
+                    log.warning("/cancel: failed to remove %s: %s", filepath, e)
+            # Also remove any .part files in output dir matching this job
+            out_dir = state.output_base
+            if out_dir and os.path.isdir(out_dir):
+                try:
+                    for f in os.listdir(out_dir):
+                        if f.endswith('.part') or f.endswith('.ytdl'):
+                            full = os.path.join(out_dir, f)
+                            try:
+                                os.remove(full)
+                                log.info("/cancel: removed temp file %s", full)
+                            except OSError:
+                                pass
+                except Exception:
+                    pass
+        # Also cancel any active probe-meta jobs
+        for pjid, pjobj in list(probe_meta_jobs.items()):
+            if pjobj.get("status") == "running":
+                pjobj["status"] = "error"
+                pjobj["error"] = "cancelled"
+        if killed or job:
             self._json({"ok": True, "message": "Download cancelled"})
         else:
             self._json({"ok": True, "message": "No active download to cancel"})

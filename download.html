@@ -216,6 +216,7 @@
   }
   .res-btn:hover { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(108,92,231,.35); }
   .res-btn:disabled { opacity: .5; cursor: wait; transform: none; box-shadow: none; }
+  .opt-btn.dl-disabled { opacity: .4; pointer-events: none; cursor: default; }
   .res-btn .res-label { font-size: .9rem; }
   .res-btn .res-meta { font-size: .7rem; color: rgba(255,255,255,.7); text-align: right; line-height: 1.3; }
 
@@ -410,6 +411,9 @@
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
       </div>
+      <div style="text-align:center;margin-top:8px;">
+        <button id="cancelBtn" onclick="cancelDownload()" style="padding:8px 20px;background:rgba(255,71,87,.15);border:1px solid rgba(255,71,87,.3);border-radius:10px;color:#ff6b6b;cursor:pointer;font-size:.82rem;font-weight:600;transition:all .2s;">✕ Остановить</button>
+      </div>
       <div class="error-toast" id="errorToast">
         <div class="title" id="errorTitle">❌ Ошибка</div>
         <div class="message" id="errorMessage"></div>
@@ -519,11 +523,16 @@ let currentDuration = 0;
 
 // ── Client-side size cache ───────────────────────────────────────
 // Persists across mode switches (video ↔ audio) and re-probes of same URL
-window._probeSizeCache = {};   // {url: {filesize: int, duration: float}}
-window._probeUrl = null;
+let _probeSizeCache = {};   // {url: {filesize: int, duration: float}}
+let _probeUrl = null;
+let currentUrl = '';
+let currentDuration = 0;
+let _downloadActive = false;  // true while a download is in progress
+let currentDlJobId = null;    // job_id of active download (for cancel)
 
 /* ── Mode toggle ─────────────────────────────────────────── */
 function setMode(m) {
+  if (_downloadActive) return;  // block mode switch during download
   mode = m;
   document.getElementById('optVideo').classList.toggle('active', m === 'video');
   document.getElementById('optAudio').classList.toggle('active', m === 'audio');
@@ -636,32 +645,33 @@ function startProbeMeta(url, formatId, btn, mode) {
     .then(data => {
       if (data.status === 'done' && data.filesize) {
         // Refresh button to show the updated size
-        _updateBtnSize(btn, mode, data.filesize);
+        _updateBtnSize(btn, mode, data.filesize, !!data.estimated);
       } else if (data.job_id && data.job_id !== 'cached') {
         // Started a new probe — poll for result
         _pollProbeMeta(data.job_id, btn, mode);
       } else if (data.job_id === 'cached' && data.filesize) {
         // Already cached — update immediately
-        _updateBtnSize(btn, mode, data.filesize);
+        _updateBtnSize(btn, mode, data.filesize, !!data.estimated);
       }
     })
     .catch(() => {});
 }
 
 /* ── Update button size display ──────────────────────────── */
-function _updateBtnSize(btn, mode, filesize) {
+function _updateBtnSize(btn, mode, filesize, estimated) {
   if (!btn) return;
   var el = btn.querySelector('.res-meta');
   if (!el) return;
   var ext = (btn.dataset.ext || '?').toUpperCase();
   if (filesize && filesize > 0) {
-    el.textContent = _human(filesize) + ' · ' + ext;
+    var prefix = estimated ? '~' : '';
+    el.textContent = prefix + _human(filesize) + ' · ' + ext;
     el.classList.remove('size-loading');
     // Store for mode-switch persistence
     var fmtId = btn.dataset.formatId;
-    if (fmtId && window._probeSizeCache[currentUrl]) {
-      window._probeSizeCache[currentUrl]['audio_' + fmtId] = filesize;
-      window._probeSizeCache[currentUrl]['video_' + fmtId] = filesize;
+    if (fmtId && currentUrl && window._probeSizeCache[currentUrl]) {
+      window._probeSizeCache[currentUrl]['audio_' + fmtId] = { size: filesize, estimated: !!estimated };
+      window._probeSizeCache[currentUrl]['video_' + fmtId] = { size: filesize, estimated: !!estimated };
     }
   }
 }
@@ -674,18 +684,18 @@ function _applyCachedSizes() {
   document.querySelectorAll('#resButtons .res-btn').forEach(btn => {
     const fmtId = btn.dataset.formatId;
     if (!fmtId) return;
-    const cachedSize = cache['video_' + fmtId];
-    if (cachedSize && cachedSize > 0) {
-      _updateBtnSize(btn, 'video', cachedSize);
+    const cached = cache['video_' + fmtId];
+    if (cached && cached.size && cached.size > 0) {
+      _updateBtnSize(btn, 'video', cached.size, !!cached.estimated);
     }
   });
   // Apply to audio buttons
   document.querySelectorAll('#audioButtons .res-btn').forEach(btn => {
     const fmtId = btn.dataset.formatId;
     if (!fmtId) return;
-    const cachedSize = cache['audio_' + fmtId];
-    if (cachedSize && cachedSize > 0) {
-      _updateBtnSize(btn, 'audio', cachedSize);
+    const cached = cache['audio_' + fmtId];
+    if (cached && cached.size && cached.size > 0) {
+      _updateBtnSize(btn, 'audio', cached.size, !!cached.estimated);
     }
   });
 }
@@ -714,8 +724,7 @@ function _pollProbeMeta(jobId, btn, mode) {
       try {
         var job = JSON.parse(xhr.responseText);
         if (job.status === 'done') {
-          var fs = job.filesize;
-          _updateBtnSize(btn, mode, fs);
+          _updateBtnSize(btn, mode, job.filesize, !!job.estimated);
         } else if (job.status === 'error') {
           // Stop polling on error
         } else {
@@ -1049,6 +1058,7 @@ function startDownloadBestAudio() {
 }
 
 function _startDownload(url, dlMode, formatId, height, acodec) {
+  _downloadActive = true;
   document.getElementById('dlProgress').style.display = 'block';
   document.getElementById('dlProgress').classList.add('fade-in');
   hideError();
@@ -1058,6 +1068,10 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
   document.getElementById('dlStatusLeft').textContent = 'Запуск…';
   document.getElementById('dlStatusRight').textContent = '';
   document.querySelectorAll('.res-btn, .big-downloads-btn').forEach(b => b.disabled = true);
+  // Disable mode buttons
+  document.getElementById('optVideo').classList.add('dl-disabled');
+  document.getElementById('optAudio').classList.add('dl-disabled');
+  currentDlJobId = null;
   fetch('/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1065,12 +1079,13 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
   })
   .then(r => r.json())
   .then(data => {
-    if (data.error) { showError('Ошибка', data.error); enableDlButtons(); return; }
+    if (data.error) { showError('Ошибка', data.error); enableDlButtons(); _downloadActive = false; return; }
     if (data.deps_ready) {
       document.getElementById('dlStatusLeft').textContent = '✅ Зависимости готовы, запуск…';
       setTimeout(() => { enableDlButtons(); _startDownload(url, dlMode, formatId, height); }, 500);
       return;
     }
+    currentDlJobId = data.job_id;
     const label = (dlMode === 'audio') ? 'Аудио (MP3)' : (height ? height + 'p' : 'Видео');
     document.getElementById('dlStatusLeft').textContent = `📦 ${data.platform} — скачивание ${label}…`;
     document.getElementById('dlStatusRight').textContent = '';
@@ -1081,21 +1096,17 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
         .then(d => {
           if (d.lines) {
             // Only show [download] progress lines in the status.
-            // Filter out noisy yt-dlp prefixes like [youtube], [info], [Merger], etc.
             const progressLines = d.lines.filter(l => /^\[download\]/.test(l) || /^\s*\d+\.\d+%/.test(l));
             if (progressLines.length > 0) {
               const last = progressLines[progressLines.length - 1];
-              // Trim the [download] prefix for cleaner display
               const display = last.replace(/^\[download\]\s*/, '');
               document.getElementById('dlStatusLeft').textContent = display;
             }
-            // Show speed from server-parsed data
             if (d.speed != null) {
               document.getElementById('dlStatusRight').textContent = _humanSpeed(d.speed);
             } else if (d.filesize != null && d.filesize > 0) {
               document.getElementById('dlStatusRight').textContent = _human(d.filesize);
             }
-            // Show stall warning
             if (d.stall_warning) {
               document.getElementById('dlStatusLeft').textContent = '⚠️ ' + d.stall_warning;
             }
@@ -1108,6 +1119,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
           }
           if (d.status === 'done' || d.status === 'error') {
             clearInterval(dlPoll);
+            _downloadActive = false;
             document.getElementById('dlBar').style.width = '100%';
             document.getElementById('dlBar').classList.add('done');
             document.getElementById('dlStatusRight').textContent = '';
@@ -1115,12 +1127,12 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             else { document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки'; }
             enableDlButtons();
           } else {
-            // Parse real progress from yt-dlp output
+            // Parse real progress from yt-dlp output (all lines, not just filtered)
             for (const l of d.lines) {
-              const pctMatch = l.match(/^\s*(\d+\.?\d*)%/);
+              const pctMatch = l.match(/(\d+\.?\d*)%/);
               if (pctMatch) {
                 const pct = Math.min(parseFloat(pctMatch[1]), 99);
-                bar.style.width = pct + '%';
+                dlBar.style.width = pct + '%';
               }
             }
           }
@@ -1128,6 +1140,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
     }, 1500);
   })
   .catch(err => {
+    _downloadActive = false;
     showError('Ошибка соединения', err.message);
     enableDlButtons();
   });
@@ -1144,6 +1157,14 @@ function _humanSpeed(bytesPerSec) {
 
 function enableDlButtons() {
   document.querySelectorAll('.res-btn, .big-downloads-btn').forEach(b => b.disabled = false);
+  document.getElementById('optVideo').classList.remove('dl-disabled');
+  document.getElementById('optAudio').classList.remove('dl-disabled');
+}
+
+function cancelDownload() {
+  if (!currentDlJobId) return;
+  fetch('/cancel?job_id=' + encodeURIComponent(currentDlJobId), { method: 'POST' })
+    .catch(() => {});
 }
 
 /* ── Cookies dialog ─────────────────────────────────────── */

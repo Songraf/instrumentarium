@@ -96,13 +96,15 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
                 audio_bitrate_kbps = 128
                 audio_size = int(video_duration * audio_bitrate_kbps * 1024 / 8)
                 result["filesize"] = audio_size
+                result["estimated"] = True
                 log.info("/probe-meta thread %s: audio estimate %d MB (based on %dkbps)",
                          jid, audio_size / (1024*1024), audio_bitrate_kbps)
             else:
                 result["filesize"] = int(total_size * (video_duration / _PROBE_DURATION))
+                result["estimated"] = True
         probe_meta_jobs[jid] = {"status": "done", **result}
         cache_key = _cache_key(url, format_id)
-        _probe_meta_cache[cache_key] = {"filesize": result["filesize"] or 0, "duration": float(video_duration or 0)}
+        _probe_meta_cache[cache_key] = {"filesize": result["filesize"] or 0, "duration": float(video_duration or 0), "estimated": result.get("estimated", False)}
         log.info("/probe-meta thread %s: done raw_size=%d estimated_size=%d", jid, total_size, result["filesize"] or 0)
     except Exception as e:
         log.error("/probe-meta thread %s: error %s", jid, e)
@@ -208,6 +210,9 @@ class JobLogger(threading.Thread):
 
                 if "[download] Destination:" in line:
                     filepath = line.split("Destination:", 1)[1].strip()
+                    j["filepath"] = filepath
+                    # Track partial file path (yt-dlp writes to .part during download)
+                    j["_partial_filepath"] = filepath + ".part"
                 elif line.startswith("[Merger]") and "into" in line:
                     idx = line.rfind('"')
                     idx2 = line.rfind('"', 0, idx)

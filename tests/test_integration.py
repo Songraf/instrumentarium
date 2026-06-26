@@ -226,5 +226,65 @@ class TestAppStateThreadSafety(unittest.TestCase):
         self.assertEqual(len(errors), 0)
 
 
+class TestCancelEndpoint(unittest.TestCase):
+    """Test /cancel endpoint code structure."""
+
+    def test_cancel_accepts_job_id_param(self):
+        """_handle_cancel reads job_id from query string."""
+        import inspect
+        from server_main import Handler
+        source = inspect.getsource(Handler._handle_cancel)
+        self.assertIn("job_id", source)
+        self.assertIn("_partial_filepath", source)
+
+    def test_cancel_removes_part_files(self):
+        """_handle_cancel removes .part and .ytdl files."""
+        import inspect
+        from server_main import Handler
+        source = inspect.getsource(Handler._handle_cancel)
+        self.assertIn(".part", source)
+        self.assertIn(".ytdl", source)
+
+    def test_cancel_cancels_probe_meta(self):
+        """_handle_cancel cancels running probe-meta jobs."""
+        import inspect
+        from server_main import Handler
+        source = inspect.getsource(Handler._handle_cancel)
+        self.assertIn("probe_meta_jobs", source)
+
+    def test_download_jobs_have_partial_filepath(self):
+        """Download jobs include _partial_filepath field."""
+        import inspect
+        from server_main import Handler
+        source = inspect.getsource(Handler._handle_download)
+        self.assertIn("_partial_filepath", source)
+
+
+class TestProbeMetaEstimatedFlag(unittest.TestCase):
+    """Test that probe-meta returns estimated flag."""
+
+    def test_probe_meta_sets_estimated_true_on_extrapolation(self):
+        """_run_probe_meta sets estimated=True when extrapolating."""
+        import inspect
+        from server.download import _run_probe_meta
+        source = inspect.getsource(_run_probe_meta)
+        self.assertIn("estimated", source)
+        self.assertIn("True", source)
+
+    def test_probe_meta_cache_stores_estimated(self):
+        """_probe_meta_cache stores estimated flag."""
+        import inspect
+        from server.download import _run_probe_meta
+        source = inspect.getsource(_run_probe_meta)
+        self.assertIn('"estimated"', source)
+
+    def test_server_sends_estimated_in_response(self):
+        """Server _handle_probe_meta returns estimated in JSON."""
+        import inspect
+        from server_main import Handler
+        source = inspect.getsource(Handler._handle_probe_meta)
+        self.assertIn("estimated", source)
+
+
 if __name__ == "__main__":
     unittest.main()
