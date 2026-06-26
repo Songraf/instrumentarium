@@ -50,7 +50,12 @@ def _run_probe_meta(jid, url, yt_path, format_id, video_duration):
             # yt-dlp will extract audio during post-processing
             fmt = "bestaudio[ext=m4a]/bestaudio/best"
         elif format_id and "+" not in format_id:
-            fmt = format_id + "+bestaudio/best"
+            # HLS formats already contain audio (muxed), don't add +bestaudio/best
+            # Adding it causes yt-dlp to hang on HLS streams
+            if format_id.startswith("hls-"):
+                fmt = format_id
+            else:
+                fmt = format_id + "+bestaudio/best"
         else:
             fmt = format_id if format_id else "best"
         # Use --download-sections to grab exactly PROBE_DURATION seconds of video content
@@ -139,6 +144,9 @@ class JobLogger(threading.Thread):
             if self.format_id:
                 has_audio = ("+" in self.format_id) or (self.acodec and self.acodec not in ("none", ""))
                 if has_audio:
+                    fmt = self.format_id
+                elif self.format_id.startswith("hls-"):
+                    # HLS streams already contain audio (muxed), don't add +bestaudio/best
                     fmt = self.format_id
                 else:
                     fmt = f"{self.format_id}+bestaudio/best"
