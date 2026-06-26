@@ -24,7 +24,7 @@
     background: #12122a;
     border: 1px solid #1e1e3f;
     border-radius: 20px;
-    padding: 28px;
+    padding: 28px 28px 60px 28px;
     width: 540px;
     max-width: 95vw;
     box-shadow: 0 24px 80px rgba(0,0,0,.6), 0 0 120px rgba(108,92,231,.05);
@@ -106,7 +106,7 @@
     height: 32px; border-radius: 16px;
     border: 1px solid rgba(108,92,231,.3);
     box-shadow: inset 0 2px 6px rgba(0,0,0,.4);
-    position: relative; overflow: visible;
+    overflow: hidden; position: relative;
   }
   .progress-bg.tall .progress-bar { border-radius: 16px; }
   .progress-bar {
@@ -116,14 +116,6 @@
     transition: width .5s ease; animation: shimmer 1.5s linear infinite;
   }
   .progress-bar.done { animation: none; background: #4caf50; }
-  .pct-text {
-    position: absolute; inset: 0;
-    text-align: center; z-index: 2;
-    font-size: .78rem; font-weight: 700; color: #fff;
-    text-shadow: 0 1px 4px rgba(0,0,0,.7);
-    pointer-events: none;
-    display: flex; align-items: center; justify-content: center;
-  }
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
   .progress-label {
@@ -241,34 +233,47 @@
     background: rgba(255,255,255,.15); border-radius: 6px; padding: 2px 8px; font-size: .65rem;
   }
 
-  /* ── Downloads button (floating square, bottom-right) ──────── */
+  /* ── Card footer (version + downloads button) ──────────────── */
+  .card { position: relative; }
+  .card-footer-left {
+    position: absolute; bottom: 12px; left: 16px;
+    font-size: .7rem; color: #555; pointer-events: none;
+  }
   .big-downloads-btn {
-    position: fixed; bottom: 20px; right: 20px;
-    width: 48px; height: 48px; padding: 0;
+    position: absolute; bottom: 12px; right: 16px;
+    width: 40px; height: 40px; padding: 0;
     background: linear-gradient(135deg, rgba(108,92,231,.2), rgba(167,139,250,.15));
-    border: 1px solid rgba(108,92,231,.3); border-radius: 12px;
-    color: #a78bfa; font-size: 1.4rem; cursor: pointer;
+    border: 1px solid rgba(108,92,231,.3); border-radius: 10px;
+    color: #a78bfa; font-size: 1.2rem; cursor: pointer;
     transition: all .2s;
     display: flex; align-items: center; justify-content: center;
     box-shadow: 0 4px 20px rgba(0,0,0,.4);
-    z-index: 100;
+    z-index: 1;
   }
   .big-downloads-btn:hover {
     background: linear-gradient(135deg, rgba(108,92,231,.35), rgba(167,139,250,.25));
     border-color: rgba(108,92,231,.5);
-    transform: scale(1.08);
+    transform: scale(1.1);
     box-shadow: 0 6px 24px rgba(108,92,231,.3);
   }
 
-  .dl-progress { margin-top: 12px; transition: opacity .4s ease; }
+  .dl-progress { margin-top: 12px; transition: opacity .4s ease; position: relative; }
+  .dl-progress .pct-text {
+    position: absolute; top: 0; left: 0; right: 0; height: 32px;
+    text-align: center; z-index: 2;
+    font-size: .78rem; font-weight: 700; color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,.7);
+    pointer-events: none;
+    display: flex; align-items: center; justify-content: center;
+  }
   .dl-progress.fading { opacity: 0; pointer-events: none; }
   .dl-status {
     display: flex; justify-content: space-between; align-items: center;
     font-size: .72rem; color: #666; margin-top: 6px;
   }
-  .dl-status-left { color: #666; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 35%; }
+  .dl-status-left { color: #666; flex: 1; min-width: 0; padding-right: 8px; }
   .dl-status-center { color: #c4b5fd; font-weight: 700; font-size: .82rem; text-align: center; flex: 1; white-space: nowrap; }
-  .dl-status-right { color: #6c5ce7; font-weight: 700; font-size: .95rem; text-align: right; flex-shrink: 0; }
+  .dl-status-right { color: #666; font-size: .72rem; text-align: right; flex-shrink: 0; }
   /* ── Probing spinner ──────────────────────────────────────── */
   .probing { display: none; text-align: center; padding: 12px; color: #555; font-size: .8rem; }
   .probing.visible { display: block; }
@@ -427,7 +432,8 @@
     </div>
 
     <div class="dl-progress" id="dlProgress" style="display:none">
-      <div class="progress-bg tall"><div class="progress-bar" id="dlBar"></div><span class="pct-text" id="pctText"></span></div>
+      <div class="progress-bg tall"><div class="progress-bar" id="dlBar"></div></div>
+      <span class="pct-text" id="pctText"></span>
       <div class="dl-status">
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
         <span class="dl-status-right" id="dlStatusRight"></span>
@@ -449,11 +455,12 @@
       </span>
     </p>
     <div id="dbg" style="display:none"></div>
+    <div class="card-footer-left">v0.1.0</div>
     <button class="big-downloads-btn" onclick="openFolder()" title="Открыть папку загрузок">
       📁
     </button>
-    <div style="text-align:center;padding:8px;font-size:.7rem;color:#555;">v0.1.0</div>
   </div>
+  <div class="version-fixed">v0.1.0</div>
 
   <!-- ═══════════════════════════════════════════════════════ -->
   <!-- COOKIES DIALOG                                        -->
@@ -1088,7 +1095,8 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
   dlBar.classList.remove('done');
   document.getElementById('dlStatusLeft').textContent = 'Запуск…';
   document.getElementById('dlStatusRight').textContent = '';
-  document.querySelectorAll('.res-btn, .big-downloads-btn').forEach(b => b.disabled = true);
+  document.querySelectorAll('.res-btn').forEach(b => b.disabled = true);
+  document.querySelector('.big-downloads-btn').style.display = 'none';
   // Disable mode buttons
   document.getElementById('optVideo').classList.add('dl-disabled');
   document.getElementById('optAudio').classList.add('dl-disabled');
@@ -1196,7 +1204,8 @@ function _humanSpeed(bytesPerSec) {
 }
 
 function enableDlButtons() {
-  document.querySelectorAll('.res-btn, .big-downloads-btn').forEach(b => b.disabled = false);
+  document.querySelectorAll('.res-btn').forEach(b => b.disabled = false);
+  document.querySelector('.big-downloads-btn').style.display = '';
   document.getElementById('optVideo').classList.remove('dl-disabled');
   document.getElementById('optAudio').classList.remove('dl-disabled');
 }
