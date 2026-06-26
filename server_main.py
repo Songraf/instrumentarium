@@ -279,6 +279,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({
                 "lines": j["log"][off:],
                 "status": j["status"],
+                "cancelled": j.get("cancelled", False),
                 "speed": j.get("speed"),
                 "filesize": j.get("filesize"),
                 "downloaded_bytes": j.get("downloaded_bytes"),
@@ -642,21 +643,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Mark job as cancelled
         if job:
             job["status"] = "error"
+            job["cancelled"] = True
             job["log"].append("[cancelled] Download cancelled by user")
-            # Remove partial/incomplete file if known
-            filepath = job.get("filepath") or job.get("_partial_filepath")
+            # Remove the final file (renamed from .part) if it exists
+            filepath = job.get("filepath")
             if filepath and os.path.exists(filepath):
                 try:
                     os.remove(filepath)
-                    log.info("/cancel: removed partial file %s", filepath)
+                    log.info("/cancel: removed file %s", filepath)
                 except OSError as e:
                     log.warning("/cancel: failed to remove %s: %s", filepath, e)
-            # Also remove any .part files in output dir matching this job
+            # Remove .part file if it exists (yt-dlp writes to .part during download)
+            partial = job.get("_partial_filepath") or (filepath + ".part" if filepath else None)
+            if partial and os.path.exists(partial):
+                try:
+                    os.remove(partial)
+                    log.info("/cancel: removed partial file %s", partial)
+                except OSError as e:
+                    log.warning("/cancel: failed to remove %s: %s", partial, e)
+            # Also remove any .part/.ytdl files in output dir
             out_dir = state.output_base
             if out_dir and os.path.isdir(out_dir):
                 try:
                     for f in os.listdir(out_dir):
-                        if f.endswith('.part') or f.endswith('.ytdl'):
+                        if f.endswith('.part') or f.endswith('.ytdl') or f.endswith('.mp4.part'):
                             full = os.path.join(out_dir, f)
                             try:
                                 os.remove(full)

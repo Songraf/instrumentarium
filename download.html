@@ -425,7 +425,6 @@
       <div class="progress-bg"><div class="progress-bar" id="dlBar"><span class="pct-text" id="pctText"></span></div></div>
       <div class="dl-status">
         <span class="dl-status-left" id="dlStatusLeft">Подключение…</span>
-        <span class="dl-status-center" id="dlStatusCenter"></span>
         <span class="dl-status-right" id="dlStatusRight"></span>
       </div>
       <div style="text-align:center;margin-top:8px;">
@@ -1108,23 +1107,15 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
     const label = (dlMode === 'audio') ? 'Аудио (MP3)' : (height ? height + 'p' : 'Видео');
     document.getElementById('dlStatusLeft').textContent = `📦 ${data.platform} — скачивание ${label}…`;
     document.getElementById('dlStatusRight').textContent = '';
+    document.getElementById('pctText').textContent = '';
     let offset = 0;
     dlPoll = setInterval(() => {
       fetch('/log?job=' + data.job_id + '&offset=' + offset)
         .then(r => r.json())
         .then(d => {
           if (d.lines) {
-            // Only show [download] progress lines in the status.
-            const progressLines = d.lines.filter(l => /^\[download\]/.test(l) || /^\s*\d+\.\d+%/.test(l));
-            if (progressLines.length > 0) {
-              const last = progressLines[progressLines.length - 1];
-              const display = last.replace(/^\[download\]\s*/, '');
-              document.getElementById('dlStatusLeft').textContent = display;
-            }
             if (d.speed != null) {
               document.getElementById('dlStatusRight').textContent = _humanSpeed(d.speed);
-            } else if (d.filesize != null && d.filesize > 0) {
-              document.getElementById('dlStatusRight').textContent = _human(d.filesize);
             }
             if (d.stall_warning) {
               document.getElementById('dlStatusLeft').textContent = '⚠️ ' + d.stall_warning;
@@ -1143,9 +1134,22 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             document.getElementById('dlBar').classList.add('done');
             document.getElementById('pctText').textContent = '';
             document.getElementById('dlStatusRight').textContent = '';
-            if (d.status === 'done') { document.getElementById('dlStatusLeft').textContent = '✅ Готово!'; }
-            else { document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки'; }
-            document.getElementById('dlStatusCenter').textContent = '';
+            if (d.cancelled) {
+              document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
+              // Fade out progress block after 2 seconds
+              setTimeout(function() {
+                var prog = document.getElementById('dlProgress');
+                prog.classList.add('fading');
+                setTimeout(function() {
+                  prog.style.display = 'none';
+                  prog.classList.remove('fading');
+                }, 400);
+              }, 2000);
+            } else if (d.status === 'done') {
+              document.getElementById('dlStatusLeft').textContent = '✅ Готово!';
+            } else {
+              document.getElementById('dlStatusLeft').textContent = '❌ Ошибка загрузки';
+            }
             enableDlButtons();
           } else {
             // Parse real progress from yt-dlp output (all lines, not just filtered)
@@ -1158,17 +1162,14 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
             }
             if (latestPct !== null) {
               dlBar.style.width = latestPct + '%';
-              // Update center text: downloaded / total
+              // Update center text inside progress bar: downloaded / total
               var downloaded = d.downloaded_bytes || 0;
               var total = d.filesize || 0;
               if (total > 0) {
                 document.getElementById('pctText').textContent =
                   _human(downloaded) + ' / ' + _human(total);
-                document.getElementById('dlStatusCenter').textContent =
-                  _human(downloaded) + ' / ' + _human(total);
               } else {
                 document.getElementById('pctText').textContent = latestPct.toFixed(1) + '%';
-                document.getElementById('dlStatusCenter').textContent = latestPct.toFixed(1) + '%';
               }
             }
           }
@@ -1188,7 +1189,7 @@ function _humanSpeed(bytesPerSec) {
   let unitIdx = 0;
   let val = bytesPerSec;
   while (val >= 1024 && unitIdx < units.length - 1) { val /= 1024; unitIdx++; }
-  return val.toFixed(val >= 100 ? 0 : 1) + ' ' + units[unitIdx];
+  return val.toFixed(val >= 100 ? 0 : 2) + ' ' + units[unitIdx];
 }
 
 function enableDlButtons() {
@@ -1203,30 +1204,19 @@ function cancelDownload() {
     .then(r => r.json())
     .then(d => {
       if (d.ok || d.message) {
-        // Immediately reset UI
+        // Immediately reset some UI elements
         _downloadActive = false;
-        if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
         document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
-        document.getElementById('dlStatusCenter').textContent = '';
         document.getElementById('dlStatusRight').textContent = '';
         document.getElementById('dlBar').style.width = '0%';
         document.getElementById('dlBar').classList.remove('done');
         document.getElementById('pctText').textContent = '';
         enableDlButtons();
-        // Fade out the whole progress block after 2 seconds
-        setTimeout(function() {
-          var prog = document.getElementById('dlProgress');
-          prog.classList.add('fading');
-          setTimeout(function() {
-            prog.style.display = 'none';
-            prog.classList.remove('fading');
-          }, 400);
-        }, 2000);
+        // The main dlPoll will handle fade-out when it receives cancelled status
       }
     })
     .catch(() => {});
 }
-
 /* ── Cookies dialog ─────────────────────────────────────── */
 function showCookiesDialog() {
   document.getElementById('cookiesContent').value = '';
