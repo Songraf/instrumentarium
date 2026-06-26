@@ -1230,11 +1230,11 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
     document.getElementById('pctText').textContent = '';
     let offset = 0;
     dlPoll = setInterval(() => {
-      if (_pollStopped) { clearInterval(dlPoll); dlPoll = null; return; }
+      if (_pollStopped || _cancelHandled || !_downloadActive) { clearInterval(dlPoll); dlPoll = null; return; }
       fetch('/log?job=' + data.job_id + '&offset=' + offset)
         .then(r => r.json())
         .then(d => {
-          if (_pollStopped) { return; }
+          if (_pollStopped || _cancelHandled || !_downloadActive) { return; }
           console.log('[POLL] status=' + d.status + ' cancelled=' + d.cancelled + ' _cancelHandled=' + _cancelHandled);
           if (d.lines) {
             if (d.speed != null) {
@@ -1362,12 +1362,28 @@ function _applyCancelUI() {
   dlPoll = null;
   document.getElementById('dlStatusLeft').textContent = '❌ Отменено пользователем';
   document.getElementById('dlStatusRight').textContent = '';
-  document.getElementById('dlBar').style.width = '0%';
-  document.getElementById('dlBar').classList.remove('done');
   document.getElementById('pctText').textContent = '';
   enableDlButtons();
   document.getElementById('cancelArea').style.display = 'none';
   enableUrlInput();
+  // Fade out progress bar after brief delay
+  setTimeout(function() {
+    var prog = document.getElementById('dlProgress');
+    var bar = document.getElementById('dlBar');
+    bar.style.transition = 'width 0.4s ease';
+    bar.style.width = '0%';
+    setTimeout(function() {
+      prog.style.transition = 'opacity 0.5s ease';
+      prog.style.opacity = '0';
+      setTimeout(function() {
+        prog.style.display = 'none';
+        prog.style.opacity = '1';
+        prog.style.transition = '';
+        bar.style.transition = '';
+        bar.style.width = '0%';
+      }, 500);
+    }, 400);
+  }, 1500);
   console.log('[CANCEL] UI updated');
 }
 /* ── Cookies dialog ─────────────────────────────────────── */
