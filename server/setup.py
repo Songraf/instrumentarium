@@ -297,7 +297,7 @@ def install_python(base_dir, script_dir):
             "PrependPath=1", "Include_pip=1",
         ])
         state.add_message("✅ Python установлен! Перезапусти приложение вручную.", "ok")
-        state.set_progress(0)
+        state.set_progress(100)
         state.set_phase("done")
         state.set_python_ok(True)
         state.set_server_started(True)
@@ -496,8 +496,8 @@ def ensure_deps(base_dir, yt_dlp_dir, yt_dlp_path, bin_candidates, output_base):
         os.makedirs(output_base, exist_ok=True)
         state.set_python_ok(True)
         state.set_ytdlp_ok(True)
+        state.set_progress(100)
         state.set_phase("done")
-        state.set_progress(0)
         state.set_server_started(True)
         write_marker(os.path.join(base_dir, ".setup_done"))
         return True
@@ -567,7 +567,7 @@ def run_setup(base_dir, yt_dlp_dir, yt_dlp_path, bin_candidates, output_base, se
     state.set_progress(95)
     os.makedirs(output_base, exist_ok=True)
     state.add_message("✅ Готово! Загрузки сохраняются в папку «Загрузки»", "ok")
-    state.set_progress(0)
+    state.set_progress(100)
     state.set_phase("done")
     state.set_server_started(True)
     write_marker(setup_marker_path)
