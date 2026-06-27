@@ -773,6 +773,20 @@ def _cleanup_worker():
             log.error("Job cleanup error: %s", e)
 
 
+# ── Restore cookies from disk (runs on every import) ────────────────────
+import getpass
+log.info("COOKIES RESTORE: DATA_DIR=%s COOKIES_FILE=%s exists=%s", DATA_DIR, COOKIES_FILE, os.path.isfile(COOKIES_FILE))
+if os.path.isfile(COOKIES_FILE):
+    state.cookies_path = COOKIES_FILE
+    with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+        content = f.read()
+    log.info("Restored cookies from %s (%d bytes)", COOKIES_FILE, len(content))
+    _safe_print(f"   ✅ Cookies restored ({len(content)} bytes)")
+else:
+    log.info("No cookies file found at %s", COOKIES_FILE)
+    _safe_print(f"   ⚠️  No cookies at {COOKIES_FILE}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -786,30 +800,6 @@ if __name__ == "__main__":
     # Start cleanup thread
     cleanup_thread = threading.Thread(target=_cleanup_worker, daemon=True)
     cleanup_thread.start()
-
-    # Restore cookies from disk if file exists
-    import getpass
-    _safe_print(f"   👤 User: {getpass.getuser()}")
-    _safe_print(f"   📁 DATA_DIR: {DATA_DIR}")
-    _safe_print(f"   🍪 COOKIES_FILE: {COOKIES_FILE}")
-    _safe_print(f"   📄 File exists: {os.path.isfile(COOKIES_FILE)}")
-    log.info("COOKIES RESTORE: DATA_DIR=%s COOKIES_FILE=%s exists=%s", DATA_DIR, COOKIES_FILE, os.path.isfile(COOKIES_FILE))
-    if os.path.isfile(COOKIES_FILE):
-        state.cookies_path = COOKIES_FILE
-        with open(COOKIES_FILE, "r", encoding="utf-8") as f:
-            content = f.read()
-        log.info("Restored cookies from %s (%d bytes)", COOKIES_FILE, len(content))
-        _safe_print(f"   ✅ Cookies restored ({len(content)} bytes)")
-    else:
-        log.info("No cookies file found at %s", COOKIES_FILE)
-        # List what IS in the data dir
-        try:
-            files = os.listdir(DATA_DIR)
-            log.info("DATA_DIR contents: %s", files)
-            _safe_print(f"   📂 Contents of {DATA_DIR}: {files}")
-        except Exception as e:
-            log.error("Cannot list %s: %s", DATA_DIR, e)
-            _safe_print(f"   ❌ Cannot list {DATA_DIR}: {e}")
 
     _safe_print(f"🎬 Video Downloader Server")
     _safe_print(f"   URL: http://localhost:{PORT}")
