@@ -101,6 +101,7 @@ os.makedirs(_BASE_DIR, exist_ok=True)
 
 SETUP_MARKER = os.path.join(_BASE_DIR, ".setup_done")
 _LOCK_PATH = os.path.join(_BASE_DIR, ".instrumentarium.lock")
+COOKIES_FILE = os.path.join(_BASE_DIR, ".cookies.txt")
 
 if hasattr(sys, "_MEIPASS"):
     _EXE_DIR = os.path.dirname(os.path.abspath(sys.executable))
@@ -558,6 +559,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # Clear cookies
         if not path and not content:
             state.cookies_path = None
+            # Remove the cookies file from disk
+            if os.path.isfile(COOKIES_FILE):
+                try:
+                    os.remove(COOKIES_FILE)
+                except Exception:
+                    pass
             self._json({"ok": True, "path": None})
             return
 
@@ -577,11 +584,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if len(raw) > 1_000_000:
                     self._json({"error": "Cookies file too large (max 1MB)"})
                     return
-                tmp = os.path.join(_BASE_DIR, ".cookies.txt")
-                with open(tmp, "w", encoding="utf-8") as f:
+                with open(COOKIES_FILE, "w", encoding="utf-8") as f:
                     f.write(raw)
-                state.cookies_path = tmp
-                self._json({"ok": True, "path": tmp})
+                state.cookies_path = COOKIES_FILE
+                self._json({"ok": True, "path": COOKIES_FILE})
             except Exception as e:
                 self._json({"error": str(e)})
             return
@@ -739,6 +745,11 @@ if __name__ == "__main__":
     # Start cleanup thread
     cleanup_thread = threading.Thread(target=_cleanup_worker, daemon=True)
     cleanup_thread.start()
+
+    # Restore cookies from disk if file exists
+    if os.path.isfile(COOKIES_FILE):
+        state.cookies_path = COOKIES_FILE
+        log.info("Restored cookies from %s", COOKIES_FILE)
 
     _safe_print(f"🎬 Video Downloader Server")
     _safe_print(f"   URL: http://localhost:{PORT}")

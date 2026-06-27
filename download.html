@@ -683,6 +683,10 @@ function doProbe(url) {
         document.getElementById('videoTitle').textContent = '📹 ' + probedTitle;
         document.getElementById('videoTitle').classList.add('visible');
         document.getElementById('modeRow').classList.remove('hidden');
+        // Ensure progress block is hidden after successful probe
+        var _progAfterProbe = document.getElementById('dlProgress');
+        _progAfterProbe.style.display = 'none';
+        _progAfterProbe.classList.remove('probe-error');
         renderResButtons();
       })
       .catch(err => {
@@ -1183,7 +1187,12 @@ function showError(title, message) {
 
 function hideError() {
   document.getElementById('errorToast').classList.remove('visible');
-  document.getElementById('dlProgress').classList.remove('probe-error');
+  var prog = document.getElementById('dlProgress');
+  prog.classList.remove('probe-error');
+  // If no download is active, fully hide the progress block
+  if (!_downloadActive) {
+    prog.style.display = 'none';
+  }
 }
 
 function startDownloadAudio(audioFormatId) {
