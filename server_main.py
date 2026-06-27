@@ -249,6 +249,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = urlparse(self.path)
+        if p.path == "/cookies":
+            log.info(">>> do_GET /cookies query=%s from %s", p.query, self.client_address[0])
 
         if p.path in ("/", "/index.html"):
             _serve_html_file(self)
@@ -360,6 +362,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
 
         if self.path == "/cookies":
+            log.info(">>> do_POST /cookies from %s", self.client_address[0])
             self._handle_cookies()
             return
 
@@ -593,11 +596,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_cookies_locked(self):
         """Inner handler (called under _cookies_lock)."""
+        log.info("=== _handle_cookies_locked START: command=%s ===", self.command)
         if self.command == "GET":
             # Return current cookies content so UI can display it
             self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             log.info("GET /cookies: state.cookies_path=%s, COOKIES_FILE=%s, file_exists=%s",
                      state.cookies_path, COOKIES_FILE, os.path.isfile(COOKIES_FILE))
+            if os.path.isfile(COOKIES_FILE):
+                file_stat = os.stat(COOKIES_FILE)
+                log.info("GET /cookies: file size=%d, mtime=%d", file_stat.st_size, file_stat.st_mtime)
             if state.cookies_path and os.path.isfile(COOKIES_FILE):
                 try:
                     with open(COOKIES_FILE, "r", encoding="utf-8") as f:

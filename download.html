@@ -1423,7 +1423,7 @@ function showCookiesDialog() {
   document.getElementById('cookiesDialog').style.display = 'flex';
 
   // Load current cookies from server (cache-bust to always get fresh data)
-  fetch('/cookies?t=' + Date.now())
+  fetch('/cookies?t=' + Date.now(), { cache: 'no-store' })
     .then(r => r.json())
     .then(data => {
       console.log('[cookies] GET response:', JSON.stringify(data).substring(0, 200));
