@@ -249,6 +249,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = urlparse(self.path)
+        log.info(">>> do_GET path=%r query=%s from %s", self.path, p.query, self.client_address[0])
 
         if p.path in ("/", "/index.html"):
             _serve_html_file(self)

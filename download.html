@@ -1435,6 +1435,12 @@ function showCookiesDialog() {
       });
   }
 
+  // First check if server is alive
+  fetch('/status?t=' + Date.now(), { cache: 'no-store' })
+    .then(r => { console.log('[cookies] /status OK:', r.status); return r.json(); })
+    .then(d => console.log('[cookies] /status response:', JSON.stringify(d).substring(0, 100)))
+    .catch(err => console.error('[cookies] /status FAILED:', err.message));
+
   // Load current cookies from server (cache-bust to always get fresh data)
   fetchCookies(3)
     .then(data => {
