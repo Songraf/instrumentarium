@@ -90,6 +90,25 @@ def _safe_print(*args, **kwargs):
 
 PORT = 18765
 
+# ── System data directory (persistent across restarts) ─────────────────
+# Windows: %APPDATA%\.instrumentarium  (C:\Users\<user>\AppData\Roaming\.instrumentarium)
+# Linux:   ~/.instrumentarium
+# macOS:   ~/Library/Application Support/.instrumentarium
+def _get_system_data_dir():
+    """Return platform-specific persistent data directory."""
+    system = platform.system()
+    if system == "Windows":
+        base = os.environ.get("APPDATA", os.path.expanduser("~"))
+        path = os.path.join(base, ".instrumentarium")
+    elif system == "Darwin":
+        path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", ".instrumentarium")
+    else:
+        path = os.path.join(os.path.expanduser("~"), ".instrumentarium")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+DATA_DIR = _get_system_data_dir()
+
 # ── Working directory ─────────────────────────────────────────────────
 if not globals().get("_BASE_DIR"):
     if hasattr(sys, "_MEIPASS"):
@@ -98,10 +117,9 @@ if not globals().get("_BASE_DIR"):
         _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.makedirs(_BASE_DIR, exist_ok=True)
 
-
 SETUP_MARKER = os.path.join(_BASE_DIR, ".setup_done")
-_LOCK_PATH = os.path.join(_BASE_DIR, ".instrumentarium.lock")
-COOKIES_FILE = os.path.join(_BASE_DIR, ".cookies.txt")
+LOCK_PATH = os.path.join(_BASE_DIR, ".instrumentarium.lock")
+COOKIES_FILE = os.path.join(DATA_DIR, "cookies.txt")
 
 if hasattr(sys, "_MEIPASS"):
     _EXE_DIR = os.path.dirname(os.path.abspath(sys.executable))
@@ -312,6 +330,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(job)
             return
 
+        if p.path == "/cookies":
+            self._handle_cookies()
+            return
+
         if p.path == "/cancel":
             self._handle_cancel()
             return
@@ -429,7 +451,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 width = f.get("width") or 0
                 height = f.get("height") or 0
                 ext = f.get("ext", "?")
-                filesize = f.get("filesize") or f.get("filesize_approx") or 0
+                raw_filesize = f.get("filesize")
+                approx_filesize = f.get("filesize_approx")
+                filesize = raw_filesize or approx_filesize or 0
+                is_approx = raw_filesize is None and approx_filesize is not None
                 vcodec = f.get("vcodec") or "none"
                 acodec = f.get("acodec") or "none"
                 video_ext = f.get("video_ext") or "none"
@@ -439,13 +464,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 is_video = (vcodec != "none" and vcodec is not None) or (video_ext != "none" and video_ext is not None)
                 if not is_video:
                     abr = f.get("abr") or f.get("tbr") or 0
-                    audio_filesize = f.get("filesize") or f.get("filesize_approx") or 0
+                    raw_audio_fs = f.get("filesize")
+                    approx_audio_fs = f.get("filesize_approx")
+                    audio_filesize = raw_audio_fs or approx_audio_fs or 0
+                    audio_is_approx = raw_audio_fs is None and approx_audio_fs is not None
                     if abr > 0 or audio_filesize > 0:
                         audio_formats.append({
                             "format_id": f.get("format_id", ""),
                             "ext": ext,
                             "abr": round(abr, 1) if abr else 0,
                             "filesize": audio_filesize,
+                            "is_approx": audio_is_approx,
                             "acodec": acodec,
                         })
                     continue
@@ -472,6 +501,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "height": eff_height,
                     "display_label": res_label,
                     "filesize": filesize,
+                    "is_approx": is_approx,
                     "vcodec": vcodec,
                     "acodec": acodec,
                 })
@@ -551,6 +581,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_cookies(self):
         """Handle /cookies endpoint with validation."""
+        if self.command == "GET":
+            # Return current cookies content so UI can display it
+            if state.cookies_path and os.path.isfile(COOKIES_FILE):
+                try:
+                    with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    self._json({"ok": True, "content": content, "path": COOKIES_FILE})
+                except Exception:
+                    self._json({"ok": True, "content": "", "path": None})
+            else:
+                self._json({"ok": True, "content": "", "path": None})
+            return
+
         length = int(self.headers.get("Content-Length", 0))
         body = json.loads(self.rfile.read(length) or b"{}")
         path = body.get("path", "").strip()
@@ -654,34 +697,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
             job["cancelled"] = True
             job["status"] = "error"
             job["log"].append("[cancelled] Download cancelled by user")
-            # Remove the final file (renamed from .part) if it exists
-            filepath = job.get("filepath")
-            if filepath and os.path.exists(filepath):
-                try:
-                    os.remove(filepath)
-                    log.info("/cancel: removed file %s", filepath)
-                except OSError as e:
-                    log.warning("/cancel: failed to remove %s: %s", filepath, e)
-            # Remove .part file if it exists (yt-dlp writes to .part during download)
-            partial = job.get("_partial_filepath") or (filepath + ".part" if filepath else None)
-            if partial and os.path.exists(partial):
-                try:
-                    os.remove(partial)
-                    log.info("/cancel: removed partial file %s", partial)
-                except OSError as e:
-                    log.warning("/cancel: failed to remove %s: %s", partial, e)
-            # Also remove ALL temp files in output dir (.part, .ytdl, .mp4.part, etc.)
+            # Remove ALL files created during this job (snapshot diff)
+            files_before = job.get("_files_before", set())
             out_dir = state.output_base
             if out_dir and os.path.isdir(out_dir):
                 try:
                     for f in os.listdir(out_dir):
-                        if f.endswith('.part') or f.endswith('.ytdl') or '.ytdl' in f or '.part' in f:
+                        if f not in files_before:
                             full = os.path.join(out_dir, f)
                             try:
-                                os.remove(full)
-                                log.info("/cancel: removed temp file %s", full)
-                            except OSError:
-                                pass
+                                if os.path.isfile(full) or os.path.islink(full):
+                                    os.remove(full)
+                                    log.info("/cancel: removed file %s", f)
+                            except OSError as e:
+                                log.warning("/cancel: failed to remove %s: %s", full, e)
                 except Exception:
                     pass
         # Also cancel any active probe-meta jobs

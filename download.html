@@ -843,7 +843,8 @@ function renderResButtons() {
       const btn = document.createElement('button');
       btn.className = 'res-btn';
       const abrStr = af.abr > 0 ? `${Math.round(af.abr)}kbps` : '';
-      const sizeStr = (af.filesize && af.filesize > 0) ? '~' + _human(af.filesize) : '';
+      const prefix = (af.filesize && af.filesize > 0) ? (af.is_approx ? '~' : '') : '';
+      const sizeStr = (af.filesize && af.filesize > 0) ? prefix + _human(af.filesize) : '';
       const sizeClass = (af.filesize && af.filesize > 0) ? '' : 'size-loading';
       const initialSize = sizeStr || 'Определяю…';
       btn.dataset.formatId = af.format_id;
@@ -896,7 +897,8 @@ function renderResButtons() {
     const resLabel = (rawLabel && rawLabel !== "0" && rawLabel !== "0p") ? rawLabel : "Скачать видео";
     // Show filesize from /probe immediately (marked as estimated); probe-meta refines it
     const hasProbeSize = best.filesize && best.filesize > 0;
-    const probeSizeStr = hasProbeSize ? '~' + _human(best.filesize) : '';
+    const prefix = hasProbeSize ? (best.is_approx ? '~' : '') : 'Определяю…';
+    const probeSizeStr = hasProbeSize ? prefix + _human(best.filesize) : '';
     const probeSizeClass = hasProbeSize ? '' : 'size-loading';
     const initialSize = probeSizeStr || 'Определяю…';
     btn.dataset.formatId = best.format_id;
@@ -1413,9 +1415,29 @@ function _applyCancelUI() {
 }
 /* ── Cookies dialog ─────────────────────────────────────── */
 function showCookiesDialog() {
-  document.getElementById('cookiesContent').value = '';
-  document.getElementById('cookiesStatus').textContent = '';
+  const textarea = document.getElementById('cookiesContent');
+  const status = document.getElementById('cookiesStatus');
+  textarea.value = '';
+  status.textContent = '⏳ Загрузка...';
+  status.style.color = '#888';
   document.getElementById('cookiesDialog').style.display = 'flex';
+
+  // Load current cookies from server
+  fetch('/cookies')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok && data.content) {
+        textarea.value = data.content;
+        status.textContent = '✅ Cookies загружены (' + data.content.split('\n').length + ' строк)';
+        status.style.color = '#4caf50';
+      } else {
+        textarea.value = '';
+        status.textContent = '';
+      }
+    })
+    .catch(() => {
+      status.textContent = '';
+    });
 }
 
 function saveCookiesAndClose() {

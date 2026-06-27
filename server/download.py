@@ -182,6 +182,15 @@ class JobLogger(threading.Thread):
         j["log"].append(f"[yt-dlp] {self.yt}")
         j["log"].append(f"[cmd] {' '.join(cmd)}")
 
+        # Snapshot output dir before download — track all new files for cleanup
+        out_dir_files_before = set()
+        if out_dir and os.path.isdir(out_dir):
+            try:
+                out_dir_files_before = set(os.listdir(out_dir))
+            except OSError:
+                out_dir_files_before = set()
+        j["_files_before"] = out_dir_files_before
+
         try:
             proc = _popen(cmd)
             state.active_proc = proc
