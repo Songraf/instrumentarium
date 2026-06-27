@@ -99,6 +99,9 @@ def _get_system_data_dir():
     system = platform.system()
     if system == "Windows":
         base = os.environ.get("APPDATA", os.path.expanduser("~"))
+        _safe_print(f"   🔧 APPPDATA env: {os.environ.get('APPDATA', '<not set>')}")
+        _safe_print(f"   🔧 expanduser('~'): {os.path.expanduser('~')}")
+        _safe_print(f"   🔧 Using base: {base}")
         path = os.path.join(base, ".instrumentarium")
     elif system == "Darwin":
         path = os.path.join(os.path.expanduser("~"), "Library", "Application Support", ".instrumentarium")
@@ -287,7 +290,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 state.set_phase("silent_check")
                 t = threading.Thread(target=_ensure_deps_wrapper, daemon=True)
                 t.start()
-            self._json(state.get_setup_response(os.path.exists(SETUP_MARKER)))
+            resp = state.get_setup_response(os.path.exists(SETUP_MARKER))
+            resp["cookies_path"] = state.cookies_path
+            resp["cookies_file_exists"] = os.path.isfile(COOKIES_FILE)
+            self._json(resp)
             return
 
         if p.path == "/log":
@@ -583,14 +589,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Handle /cookies endpoint with validation."""
         if self.command == "GET":
             # Return current cookies content so UI can display it
+            log.info("GET /cookies: state.cookies_path=%s, COOKIES_FILE=%s, file_exists=%s",
+                     state.cookies_path, COOKIES_FILE, os.path.isfile(COOKIES_FILE))
             if state.cookies_path and os.path.isfile(COOKIES_FILE):
                 try:
                     with open(COOKIES_FILE, "r", encoding="utf-8") as f:
                         content = f.read()
+                    log.info("GET /cookies: returning %d bytes", len(content))
                     self._json({"ok": True, "content": content, "path": COOKIES_FILE})
-                except Exception:
+                except Exception as e:
+                    log.error("GET /cookies: error reading file: %s", e)
                     self._json({"ok": True, "content": "", "path": None})
             else:
+                log.info("GET /cookies: returning empty (no cookies_path or file missing)")
                 self._json({"ok": True, "content": "", "path": None})
             return
 
@@ -782,6 +793,7 @@ if __name__ == "__main__":
     _safe_print(f"   📁 DATA_DIR: {DATA_DIR}")
     _safe_print(f"   🍪 COOKIES_FILE: {COOKIES_FILE}")
     _safe_print(f"   📄 File exists: {os.path.isfile(COOKIES_FILE)}")
+    log.info("COOKIES RESTORE: DATA_DIR=%s COOKIES_FILE=%s exists=%s", DATA_DIR, COOKIES_FILE, os.path.isfile(COOKIES_FILE))
     if os.path.isfile(COOKIES_FILE):
         state.cookies_path = COOKIES_FILE
         with open(COOKIES_FILE, "r", encoding="utf-8") as f:
@@ -793,8 +805,10 @@ if __name__ == "__main__":
         # List what IS in the data dir
         try:
             files = os.listdir(DATA_DIR)
+            log.info("DATA_DIR contents: %s", files)
             _safe_print(f"   📂 Contents of {DATA_DIR}: {files}")
         except Exception as e:
+            log.error("Cannot list %s: %s", DATA_DIR, e)
             _safe_print(f"   ❌ Cannot list {DATA_DIR}: {e}")
 
     _safe_print(f"🎬 Video Downloader Server")
