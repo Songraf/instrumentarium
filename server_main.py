@@ -249,8 +249,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         p = urlparse(self.path)
-        if p.path == "/cookies":
-            log.info(">>> do_GET /cookies query=%s from %s", p.query, self.client_address[0])
 
         if p.path in ("/", "/index.html"):
             _serve_html_file(self)

@@ -1422,9 +1422,21 @@ function showCookiesDialog() {
   status.style.color = '#888';
   document.getElementById('cookiesDialog').style.display = 'flex';
 
+  // Helper: fetch with retry
+  function fetchCookies(retries) {
+    return fetch('/cookies?t=' + Date.now(), { cache: 'no-store' })
+      .then(r => r.json())
+      .catch(err => {
+        if (retries > 0) {
+          console.warn('[cookies] fetch failed, retrying... (' + retries + ' left)');
+          return new Promise(resolve => setTimeout(() => resolve(fetchCookies(retries - 1)), 300));
+        }
+        throw err;
+      });
+  }
+
   // Load current cookies from server (cache-bust to always get fresh data)
-  fetch('/cookies?t=' + Date.now(), { cache: 'no-store' })
-    .then(r => r.json())
+  fetchCookies(3)
     .then(data => {
       console.log('[cookies] GET response:', JSON.stringify(data).substring(0, 200));
       if (data.ok && data.content) {
@@ -1437,8 +1449,9 @@ function showCookiesDialog() {
       }
     })
     .catch(err => {
-      console.error('[cookies] GET error:', err);
-      status.textContent = '';
+      console.error('[cookies] GET error (after retries):', err);
+      status.textContent = '❌ Ошибка загрузки cookies';
+      status.style.color = '#ff4757';
     });
 }
 
