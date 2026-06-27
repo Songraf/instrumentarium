@@ -629,6 +629,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 with open(COOKIES_FILE, "w", encoding="utf-8") as f:
                     f.write(raw)
+                # Verify write was successful
+                if os.path.isfile(COOKIES_FILE):
+                    with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+                        verify = f.read()
+                    log.info("Saved cookies to %s (%d bytes, verified: %d bytes)", COOKIES_FILE, len(raw), len(verify))
+                else:
+                    log.error("FAILED to save cookies to %s", COOKIES_FILE)
                 state.cookies_path = COOKIES_FILE
                 self._json({"ok": True, "path": COOKIES_FILE})
             except Exception as e:
@@ -770,9 +777,25 @@ if __name__ == "__main__":
     cleanup_thread.start()
 
     # Restore cookies from disk if file exists
+    import getpass
+    _safe_print(f"   👤 User: {getpass.getuser()}")
+    _safe_print(f"   📁 DATA_DIR: {DATA_DIR}")
+    _safe_print(f"   🍪 COOKIES_FILE: {COOKIES_FILE}")
+    _safe_print(f"   📄 File exists: {os.path.isfile(COOKIES_FILE)}")
     if os.path.isfile(COOKIES_FILE):
         state.cookies_path = COOKIES_FILE
-        log.info("Restored cookies from %s", COOKIES_FILE)
+        with open(COOKIES_FILE, "r", encoding="utf-8") as f:
+            content = f.read()
+        log.info("Restored cookies from %s (%d bytes)", COOKIES_FILE, len(content))
+        _safe_print(f"   ✅ Cookies restored ({len(content)} bytes)")
+    else:
+        log.info("No cookies file found at %s", COOKIES_FILE)
+        # List what IS in the data dir
+        try:
+            files = os.listdir(DATA_DIR)
+            _safe_print(f"   📂 Contents of {DATA_DIR}: {files}")
+        except Exception as e:
+            _safe_print(f"   ❌ Cannot list {DATA_DIR}: {e}")
 
     _safe_print(f"🎬 Video Downloader Server")
     _safe_print(f"   URL: http://localhost:{PORT}")
