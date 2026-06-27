@@ -1422,8 +1422,8 @@ function showCookiesDialog() {
   status.style.color = '#888';
   document.getElementById('cookiesDialog').style.display = 'flex';
 
-  // Load current cookies from server
-  fetch('/cookies')
+  // Load current cookies from server (cache-bust to always get fresh data)
+  fetch('/cookies?t=' + Date.now())
     .then(r => r.json())
     .then(data => {
       if (data.ok && data.content) {

@@ -595,6 +595,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         """Inner handler (called under _cookies_lock)."""
         if self.command == "GET":
             # Return current cookies content so UI can display it
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
             log.info("GET /cookies: state.cookies_path=%s, COOKIES_FILE=%s, file_exists=%s",
                      state.cookies_path, COOKIES_FILE, os.path.isfile(COOKIES_FILE))
             if state.cookies_path and os.path.isfile(COOKIES_FILE):
