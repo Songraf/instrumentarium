@@ -53,3 +53,4 @@ README.md
 
 # UI config (local tuning, not for distribution)
 ui-config.json
+state.db

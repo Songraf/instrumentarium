@@ -283,6 +283,11 @@
     display: flex; align-items: center; justify-content: center;
   }
   .dl-progress.fading { opacity: 0; pointer-events: none; }
+  /* During probe errors: hide bar/status, show only toast */
+  .dl-progress.probe-error .progress-bg,
+  .dl-progress.probe-error .pct-text,
+  .dl-progress.probe-error .dl-status { display: none; }
+  .dl-progress.probe-error { margin-top: 12px; }
   .dl-status {
     display: flex; justify-content: space-between; align-items: center;
     font-size: .72rem; color: #666; margin-top: 6px;
@@ -480,8 +485,9 @@
   <!-- COOKIES DIALOG                                        -->
   <!-- ═══════════════════════════════════════════════════════ -->
   <div id="cookiesDialog" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:999;align-items:center;justify-content:center;">
-    <div style="background:#12122a;border:1px solid #2a2a4a;border-radius:20px;padding:24px;width:520px;max-width:95vw;box-shadow:0 24px 80px rgba(0,0,0,.6);">
-      <h2 style="font-size:1rem;margin-bottom:6px;color:#fff;font-weight:700;">🍪 Cookies</h2>
+    <div style="background:#12122a;border:1px solid #2a2a4a;border-radius:20px;padding:24px;width:520px;max-width:95vw;box-shadow:0 24px 80px rgba(0,0,0,.6);position:relative;">
+      <button onclick="saveCookiesAndClose()" style="position:absolute;top:16px;right:16px;width:28px;height:28px;border:none;background:rgba(255,255,255,.06);border-radius:8px;color:#888;cursor:pointer;font-size:.9rem;display:flex;align-items:center;justify-content:center;transition:all .2s;" title="Сохранить и закрыть">✕</button>
+      <h2 style="font-size:1rem;margin-bottom:6px;color:#fff;font-weight:700;padding-right:36px;">🍪 Cookies</h2>
       <p style="font-size:.78rem;color:#888;margin-bottom:10px;line-height:1.5;">
         Перетащите файл cookies.txt или нажмите на область ниже.
       </p>
@@ -501,9 +507,7 @@
         <span class="cookie-help-tooltip" style="display:none;position:absolute;bottom:140%;left:0;background:#1a1a2e;border:1px solid #2a2a4a;border-radius:8px;padding:10px 14px;font-size:.7rem;color:#aaa;width:260px;line-height:1.5;box-shadow:0 4px 20px rgba(0,0,0,.5);z-index:100;pointer-events:none;">Установите браузерное расширение <strong>Get cookies.txt LOCALLY</strong> → откройте нужную страницу и войдите в аккаунт → нажмите на расширение → <strong>Export</strong> → перетащите файл сюда</span>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
-        <button class="btn" onclick="closeCookiesDialog()" style="padding:10px 20px;background:none;border:1px solid #2a2a4a;border-radius:10px;color:#888;cursor:pointer;font-size:.85rem;">Отмена</button>
         <button class="btn" onclick="clearCookies()" style="padding:10px 20px;background:none;border:1px solid rgba(255,71,87,.3);border-radius:10px;color:#ff6b6b;cursor:pointer;font-size:.85rem;">Очистить</button>
-        <button class="btn btn-primary" onclick="saveCookies()" style="padding:10px 20px;background:linear-gradient(135deg,#6c5ce7,#a78bfa);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:.85rem;font-weight:600;box-shadow:0 4px 16px rgba(108,92,231,.25);">Сохранить</button>
       </div>
       <p id="cookiesStatus" style="font-size:.7rem;color:#555;margin-top:10px;"></p>
     </div>
@@ -1163,12 +1167,23 @@ function showError(title, message) {
   var msgEl = document.getElementById('errorMessage');
   if (message) { msgEl.textContent = message; msgEl.style.display = ''; }
   else { msgEl.style.display = 'none'; }
-  document.getElementById('dlProgress').style.display = 'block';
+  // Only show the progress block if a download is actually active
+  // (errors during probe phase should NOT show the progress bar)
+  var progEl = document.getElementById('dlProgress');
+  if (_downloadActive) {
+    progEl.style.display = 'block';
+    progEl.classList.remove('probe-error');
+  } else {
+    // Probe-phase error: show only the toast, hide bar/status elements
+    progEl.style.display = 'block';
+    progEl.classList.add('probe-error');
+  }
   document.getElementById('errorToast').classList.add('visible');
 }
 
 function hideError() {
   document.getElementById('errorToast').classList.remove('visible');
+  document.getElementById('dlProgress').classList.remove('probe-error');
 }
 
 function startDownloadAudio(audioFormatId) {
@@ -1194,6 +1209,7 @@ function _startDownload(url, dlMode, formatId, height, acodec) {
   _cancelHandled = false;
   _pollStopped = false;
   document.getElementById('dlProgress').style.display = 'block';
+  document.getElementById('dlProgress').classList.remove('probe-error');
   document.getElementById('dlProgress').classList.add('fade-in');
   document.getElementById('cancelArea').style.display = '';
   // Disable URL input during download
@@ -1393,6 +1409,45 @@ function showCookiesDialog() {
   document.getElementById('cookiesDialog').style.display = 'flex';
 }
 
+function saveCookiesAndClose() {
+  const content = document.getElementById('cookiesContent').value.trim();
+  if (!content) {
+    // Empty content + close = just close, no change
+    closeCookiesDialogAndRetry();
+    return;
+  }
+  const status = document.getElementById('cookiesStatus');
+  let b64;
+  try { b64 = btoa(unescape(encodeURIComponent(content))); }
+  catch(e) {
+    status.textContent = '❌ Ошибка: ' + e.message;
+    status.style.color = '#ff4757';
+    return;
+  }
+  fetch('/cookies', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: b64 })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.ok) {
+      status.textContent = '✅ Cookies сохранены (' + content.split('\n').length + ' строк)';
+      status.style.color = '#4caf50';
+    } else {
+      status.textContent = '❌ ' + (data.error || 'Ошибка сервера');
+      status.style.color = '#ff4757';
+    }
+  })
+  .catch(err => {
+    status.textContent = '❌ Ошибка: ' + err.message;
+    status.style.color = '#ff4757';
+  })
+  .finally(() => {
+    closeCookiesDialogAndRetry();
+  });
+}
+
 function closeCookiesDialog() {
   document.getElementById('cookiesDialog').style.display = 'none';
 }
@@ -1406,53 +1461,9 @@ function closeCookiesDialogAndRetry() {
   }
 }
 
-function saveCookies() {
-  const content = document.getElementById('cookiesContent').value.trim();
-  const status = document.getElementById('cookiesStatus');
-  const btn = document.querySelector('#cookiesDialog .btn-primary');
-  if (!content) {
-    status.textContent = '❌ Вставьте содержимое cookies.txt';
-    status.style.color = '#ff4757';
-    const ta = document.getElementById('cookiesContent');
-    ta.style.animation = 'none'; ta.offsetHeight; ta.style.animation = 'shake .3s ease';
-    return;
-  }
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Сохраняю…'; btn.style.opacity = '.7'; }
-  let b64;
-  try { b64 = btoa(unescape(encodeURIComponent(content))); }
-  catch(e) {
-    status.textContent = '❌ Ошибка кодирования: ' + e.message;
-    status.style.color = '#ff4757';
-    if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; btn.style.opacity = '1'; }
-    return;
-  }
-  fetch('/cookies', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: b64 })
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.ok) {
-      status.textContent = '✅ Cookies сохранены (' + content.split('\n').length + ' строк)';
-      status.style.color = '#4caf50';
-      if (btn) { btn.textContent = '✅ Готово'; btn.style.opacity = '1'; }
-      setTimeout(() => closeCookiesDialogAndRetry(), 1200);
-    } else {
-      status.textContent = '❌ ' + (data.error || 'Ошибка сервера');
-      status.style.color = '#ff4757';
-      if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; btn.style.opacity = '1'; }
-    }
-  })
-  .catch(err => {
-    status.textContent = '❌ Ошибка: ' + err.message;
-    status.style.color = '#ff4757';
-    if (btn) { btn.disabled = false; btn.textContent = 'Сохранить'; btn.style.opacity = '1'; }
-  });
-}
-
 function clearCookies() {
   const status = document.getElementById('cookiesStatus');
+  document.getElementById('cookiesContent').value = '';
   fetch('/cookies', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1461,7 +1472,6 @@ function clearCookies() {
   .then(r => r.json())
   .then(data => {
     if (data.ok) {
-      document.getElementById('cookiesContent').value = '';
       status.textContent = '✅ Cookies очищены';
       status.style.color = '#4caf50';
     }
