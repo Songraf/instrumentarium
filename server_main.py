@@ -185,6 +185,7 @@ class _RateLimiter:
 
 _probe_limiter = _RateLimiter(max_tokens=3, refill_rate=0.5)
 _download_limiter = _RateLimiter(max_tokens=2, refill_rate=0.2)
+_cookies_lock = threading.Lock()
 
 
 # ── Serve UI ──────────────────────────────────────────────────────────
@@ -587,6 +588,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def _handle_cookies(self):
         """Handle /cookies endpoint with validation."""
+        with _cookies_lock:
+            self._handle_cookies_locked()
+
+    def _handle_cookies_locked(self):
+        """Inner handler (called under _cookies_lock)."""
         if self.command == "GET":
             # Return current cookies content so UI can display it
             log.info("GET /cookies: state.cookies_path=%s, COOKIES_FILE=%s, file_exists=%s",
@@ -609,16 +615,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or b"{}")
         path = body.get("path", "").strip()
         content = body.get("content", "").strip()
+        log.info("POST /cookies: path=%r content_len=%d", path, len(content))
 
         # Clear cookies
         if not path and not content:
+            log.info("POST /cookies: CLEARING cookies")
             state.cookies_path = None
             # Remove the cookies file from disk
             if os.path.isfile(COOKIES_FILE):
                 try:
                     os.remove(COOKIES_FILE)
-                except Exception:
-                    pass
+                    log.info("POST /cookies: removed %s", COOKIES_FILE)
+                except Exception as e:
+                    log.error("POST /cookies: remove failed: %s", e)
             self._json({"ok": True, "path": None})
             return
 
@@ -630,8 +639,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     raw = base64.b64decode(content).decode("utf-8")
                 except Exception:
                     raw = content
+                log.info("POST /cookies: decoded content %d bytes (first 100: %r)", len(raw), raw[:100])
                 # Basic validation: check for Netscape cookie format
                 if raw and not any(line.startswith("#") or "\t" in line for line in raw.split("\n")[:5]):
+                    log.warning("POST /cookies: invalid format rejected")
                     self._json({"error": "Invalid cookies format — expected Netscape cookie file"})
                     return
                 # Limit size to 1MB
@@ -644,12 +655,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if os.path.isfile(COOKIES_FILE):
                     with open(COOKIES_FILE, "r", encoding="utf-8") as f:
                         verify = f.read()
-                    log.info("Saved cookies to %s (%d bytes, verified: %d bytes)", COOKIES_FILE, len(raw), len(verify))
+                    log.info("POST /cookies: saved %s (%d bytes, verified: %d bytes)", COOKIES_FILE, len(raw), len(verify))
                 else:
-                    log.error("FAILED to save cookies to %s", COOKIES_FILE)
+                    log.error("POST /cookies: FAILED to save %s", COOKIES_FILE)
                 state.cookies_path = COOKIES_FILE
+                log.info("POST /cookies: state.cookies_path set to %s", state.cookies_path)
                 self._json({"ok": True, "path": COOKIES_FILE})
             except Exception as e:
+                log.error("POST /cookies: exception: %s", e)
                 self._json({"error": str(e)})
             return
 
