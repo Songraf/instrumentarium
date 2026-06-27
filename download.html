@@ -1422,28 +1422,37 @@ function showCookiesDialog() {
   status.style.color = '#888';
   document.getElementById('cookiesDialog').style.display = 'flex';
 
-  // Helper: fetch with retry
-  function fetchCookies(retries) {
-    return fetch('/cookies?t=' + Date.now(), { cache: 'no-store' })
-      .then(r => r.json())
-      .catch(err => {
-        if (retries > 0) {
-          console.warn('[cookies] fetch failed, retrying... (' + retries + ' left)');
-          return new Promise(resolve => setTimeout(() => resolve(fetchCookies(retries - 1)), 300));
+  // Use XMLHttpRequest instead of fetch for WebView2 compatibility
+  // WebView2 has unreliable fetch() support for localhost requests
+  function xhrGet(url) {
+    return new Promise(function(resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', url, true);
+      xhr.setRequestHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      xhr.onload = function() {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch(e) {
+            reject(new Error('Invalid JSON: ' + xhr.responseText.substring(0, 100)));
+          }
+        } else {
+          reject(new Error('HTTP ' + xhr.status + ' ' + xhr.statusText));
         }
-        throw err;
-      });
+      };
+      xhr.onerror = function() { reject(new Error('XHR network error')); };
+      xhr.send();
+    });
   }
 
   // First check if server is alive
-  fetch('/status?t=' + Date.now(), { cache: 'no-store' })
-    .then(r => { console.log('[cookies] /status OK:', r.status); return r.json(); })
-    .then(d => console.log('[cookies] /status response:', JSON.stringify(d).substring(0, 100)))
-    .catch(err => console.error('[cookies] /status FAILED:', err.message));
+  xhrGet('/status?t=' + Date.now())
+    .then(function(d) { console.log('[cookies] /status OK:', JSON.stringify(d).substring(0, 100)); })
+    .catch(function(err) { console.error('[cookies] /status FAILED:', err.message); });
 
-  // Load current cookies from server (cache-bust to always get fresh data)
-  fetchCookies(3)
-    .then(data => {
+  // Load current cookies from server
+  xhrGet('/cookies?t=' + Date.now())
+    .then(function(data) {
       console.log('[cookies] GET response:', JSON.stringify(data).substring(0, 200));
       if (data.ok && data.content) {
         textarea.value = data.content;
@@ -1455,7 +1464,7 @@ function showCookiesDialog() {
       }
     })
     .catch(err => {
-      console.error('[cookies] GET error (after retries):', err);
+      console.error('[cookies] GET error:', err.message);
       status.textContent = '❌ Ошибка загрузки cookies';
       status.style.color = '#ff4757';
     });
@@ -1478,29 +1487,39 @@ function saveCookiesAndClose() {
     return;
   }
   console.log('[cookies] saving, content length:', content.length);
-  fetch('/cookies', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content: b64 })
-  })
-  .then(r => r.json())
-  .then(data => {
-    console.log('[cookies] save response:', JSON.stringify(data));
-    if (data.ok) {
-      status.textContent = '✅ Cookies сохранены (' + content.split('\n').length + ' строк)';
-      status.style.color = '#4caf50';
+  var xhr = new XMLHttpRequest();
+  xhr.open('POST', '/cookies', true);
+  xhr.setRequestHeader('Content-Type', 'application/json');
+  xhr.onload = function() {
+    if (xhr.status >= 200 && xhr.status < 300) {
+      try {
+        var data = JSON.parse(xhr.responseText);
+        console.log('[cookies] save response:', JSON.stringify(data));
+        if (data.ok) {
+          status.textContent = '✅ Cookies сохранены (' + content.split('\n').length + ' строк)';
+          status.style.color = '#4caf50';
+        } else {
+          status.textContent = '❌ ' + (data.error || 'Ошибка сервера');
+          status.style.color = '#ff4757';
+        }
+      } catch(e) {
+        status.textContent = '❌ Ошибка ответа сервера';
+        status.style.color = '#ff4757';
+      }
     } else {
-      status.textContent = '❌ ' + (data.error || 'Ошибка сервера');
+      status.textContent = '❌ Ошибка HTTP ' + xhr.status;
       status.style.color = '#ff4757';
     }
-  })
-  .catch(err => {
-    status.textContent = '❌ Ошибка: ' + err.message;
+  };
+  xhr.onerror = function() {
+    status.textContent = '❌ Ошибка сети';
     status.style.color = '#ff4757';
-  })
-  .finally(() => {
+  };
+  xhr.send(JSON.stringify({ content: b64 }));
+  // Close dialog after XHR completes (success or error)
+  xhr.onloadend = function() {
     closeCookiesDialogAndRetry();
-  });
+  };
 }
 
 function closeCookiesDialog() {
