@@ -1426,6 +1426,7 @@ function showCookiesDialog() {
   fetch('/cookies?t=' + Date.now())
     .then(r => r.json())
     .then(data => {
+      console.log('[cookies] GET response:', JSON.stringify(data).substring(0, 200));
       if (data.ok && data.content) {
         textarea.value = data.content;
         status.textContent = '✅ Cookies загружены (' + data.content.split('\n').length + ' строк)';
@@ -1435,7 +1436,8 @@ function showCookiesDialog() {
         status.textContent = '';
       }
     })
-    .catch(() => {
+    .catch(err => {
+      console.error('[cookies] GET error:', err);
       status.textContent = '';
     });
 }
@@ -1444,6 +1446,7 @@ function saveCookiesAndClose() {
   const content = document.getElementById('cookiesContent').value.trim();
   if (!content) {
     // Empty content + close = just close, no change
+    console.log('[cookies] save skipped — empty content');
     closeCookiesDialogAndRetry();
     return;
   }
@@ -1455,6 +1458,7 @@ function saveCookiesAndClose() {
     status.style.color = '#ff4757';
     return;
   }
+  console.log('[cookies] saving, content length:', content.length);
   fetch('/cookies', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1462,6 +1466,7 @@ function saveCookiesAndClose() {
   })
   .then(r => r.json())
   .then(data => {
+    console.log('[cookies] save response:', JSON.stringify(data));
     if (data.ok) {
       status.textContent = '✅ Cookies сохранены (' + content.split('\n').length + ' строк)';
       status.style.color = '#4caf50';

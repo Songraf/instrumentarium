@@ -620,15 +620,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         # Clear cookies
         if not path and not content:
-            log.info("POST /cookies: CLEARING cookies")
+            log.info("POST /cookies: CLEARING cookies (was path=%s, content_len=%s)", state.cookies_path, len(content))
             state.cookies_path = None
             # Remove the cookies file from disk
             if os.path.isfile(COOKIES_FILE):
                 try:
+                    file_size = os.path.getsize(COOKIES_FILE)
                     os.remove(COOKIES_FILE)
-                    log.info("POST /cookies: removed %s", COOKIES_FILE)
+                    log.info("POST /cookies: removed %s (%d bytes was in file)", COOKIES_FILE, file_size)
                 except Exception as e:
                     log.error("POST /cookies: remove failed: %s", e)
+            else:
+                log.info("POST /cookies: file already absent: %s", COOKIES_FILE)
             self._json({"ok": True, "path": None})
             return
 
@@ -652,11 +655,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return
                 with open(COOKIES_FILE, "w", encoding="utf-8") as f:
                     f.write(raw)
+                    f.flush()
+                    os.fsync(f.fileno())
                 # Verify write was successful
                 if os.path.isfile(COOKIES_FILE):
                     with open(COOKIES_FILE, "r", encoding="utf-8") as f:
                         verify = f.read()
                     log.info("POST /cookies: saved %s (%d bytes, verified: %d bytes)", COOKIES_FILE, len(raw), len(verify))
+                    # Double-check file persists
+                    log.info("POST /cookies: file size on disk = %d", os.path.getsize(COOKIES_FILE))
                 else:
                     log.error("POST /cookies: FAILED to save %s", COOKIES_FILE)
                 state.cookies_path = COOKIES_FILE
