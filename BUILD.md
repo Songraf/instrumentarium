@@ -35,9 +35,8 @@
 - yt-dlp (скачивается автоматически при первом запуске)
 - ffmpeg (скачивается автоматически на Windows)
 - pywebview (нативное окно с HTML/CSS/JS UI)
-- cefpython3 (Chromium Embedded Framework — fallback для Windows без WebView2)
 - PyInstaller (сборка в standalone-бинарь)
-- pytest (57 тестов)
+- pytest (58 тестов)
 
 ---
 
@@ -76,19 +75,18 @@ instrumentarium/
 └── README.md                   # Описание проекта для GitHub
 ```
 
-### Файлы, генерируемые при работе (все в папке с .exe):
+### Файлы, генерируемые при работе
 
 ```
 <папка с .exe>/
 ├── instrumentarium.log         # Лог приложения (debug level)
 ├── .setup_done                 # Маркёр завершённой настройки (timestamp)
 ├── .instrumentarium.lock       # Lock-файл для единственного инстанса
-├── .cookies.txt                # Cookies файл (LinkedIn и др., в .gitignore)
 ├── .bin/                       # Скачанные бинарники
 │   ├── yt-dlp.exe              # (Windows) или yt-dlp (Linux/macOS)
 │   ├── ffmpeg.exe              # (Windows, скачивается автоматически)
 │   └── ffprobe.exe             # (Windows, скачивается автоматически)
-└── downloads/                  # Скачанные видео
+└── downloads/                  # Скачанные видео (системная папка ~/Downloads)
     ├── youtube/
     ├── twitter/
     ├── tiktok/
@@ -98,7 +96,17 @@ instrumentarium/
     └── other/
 ```
 
-**Важно:** Все рабочие файлы — в одной папке с исполняемым файлом. Ничего не пишется в AppData, ~/.instrumentarium, или куда-либо ещё.
+### Системная папка данных (скрытая)
+
+```
+Windows: %APPDATA%/.instrumentarium/
+Linux:   ~/.instrumentarium/
+macOS:   ~/Library/Application Support/.instrumentarium/
+├── .cookies.txt                # Cookies (сохраняются между перезапусками)
+└── instrumentarium.log          # Лог (также дублируется рядом с .exe)
+```
+
+**Важно:** Скачанные видео сохраняются в системную папку `~/Downloads`. Рабочие данные (cookies, logs) — в системной папке данных. Ничего не пишется в Temp или AppData\Local.
 
 ---
 
@@ -171,17 +179,18 @@ server_main.py (импортируется как модуль из app.py)
   │
   ├── HTTP Handler (Handler):
   │     GET  /              → download.html (с path traversal protection)
-  │     GET  /status        → JSON state.get_setup_response()
+  │     GET  /status        → JSON state.get_setup_response() + cookies_path + cookies_file_exists
   │     GET  /probe         → JSON {title, formats, audio_formats} (rate limited)
   │     GET  /probe-meta    → JSON {job_id} (async, rate limited)
   │     GET  /probe-meta-status → JSON {status, filesize}
+  │     GET  /cookies       → JSON {ok, content, path} — текущие cookies (cache-bust)
   │     GET  /log           → JSON {lines, status}
   │     GET  /open-folder   → открыть папку downloads
   | GET  /cancel        → kill active download (legacy, use POST) |
-  | POST /cancel        → kill active download + cleanup .part/.ytdl files |
+  | POST /cancel        → kill active download + cleanup .part/.ytdl files (tracked cleanup) |
   │     POST /setup         → запустить setup wizard
   │     POST /download      → запустить скачивание (rate limited)
-  │     POST /cookies       → сохранить/очистить cookies (с валидацией)
+  │     POST /cookies       → сохранить/очистить cookies (с валидацией, thread-safe)
   │     POST /shutdown      → kill subprocess + stop server
   │
   └── JobLogger (threading.Thread, daemon):
@@ -360,12 +369,14 @@ Cleanup Thread (daemon, server_main.py → _cleanup_worker)
 - **Формат файлов:** `%(title).120s [%(id)s].%(ext)s` (ограничение 120 символов)
 
 ### 6.6. Cookies файл: `.cookies.txt`
-- **Расположение:** `_BASE_DIR/.cookies.txt`
+- **Расположение:** `DATA_DIR/.cookies.txt` (системная папка: `%APPDATA%/.instrumentarium/` на Windows, `~/.instrumentarium/` на Linux)
 - **Назначение:** авторизация на платформах, требующих вход (LinkedIn и др.)
 - **Формат:** Netscape HTTP Cookie File
-- **Управление:** через диалог 🍪 Cookies в UI (drag & drop, вставка текста, очистка)
-- **Использование:** yt-dlp `--cookies .cookies.txt` при каждом запросе
+- **Управление:** через диалог 🍪 Cookies в UI (drag & drop, вставка текста, очистка, ✕ для сохранения)
+- **Использование:** yt-dlp `--cookies <path>` при каждом запросе
 - **Валидация:** проверка формата, ограничение размера 1MB
+- **Thread-safe:** все операции защищены `_cookies_lock` (threading.Lock)
+- **Persistence:** сохраняется между перезапусками программы
 - **В .gitignore**: да, не коммитится
 
 ---
@@ -616,8 +627,8 @@ python -m pytest tests/ -v
 
 ### ✅ Решено (v0.1.0, 2026-06-27)
 - Нативное окно приложения (pywebview + edgechromium)
-- Портативность: всё в одной папке с .exe (не AppData)
-- Setup wizard не появляется при повторном запуске (.setup_done)
+- Портативность: всё в одной папке с .exe (видео в ~/Downloads)
+- Setup wizard не появляется при повтором запуске (.setup_done)
 - Закрытие без зависания (daemon thread + /shutdown endpoint)
 - Zombie process: /shutdown убивает активный yt-dlp subprocess
 - Glow animation: progress-bar получает класс .done (зелёный, без shimmer)
@@ -633,6 +644,9 @@ python -m pytest tests/ -v
 - Переменный размер окна (resizable=True)
 - Вертикальные видео (Shorts): корректное отображение разрешения
 - Cookies система: drag & drop / вставка cookies.txt, LinkedIn авторизация
+- Cookies persistence: хранение в системной папке, восстановление при перезапуске
+- Cookies thread-safe: _cookies_lock для ThreadingHTTPServer
+- Безопасная очистка при отмене (tracked cleanup — только файлы yt-dlp, не snapshot diff)
 - ?-тултипы: JS onmouseenter/onmouseleave (CSS hover не работает в pywebview)
 - Визуальный фидбек кнопок: scale(.96) при :active, блокировка во время запроса
 - Маппинг ошибок yt-dlp: `_map_ytdlp_error()` → понятные сообщения на русском

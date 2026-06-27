@@ -135,7 +135,25 @@
 
 Все скачанные файлы сохраняются в **системную папку «Загрузки»** пользователя (`~/Downloads` на Linux/macOS, `%USERPROFILE%\Downloads` на Windows).
 
-**Ничего не пишется в AppData, ~/.instrumentarium, или куда-либо ещё.**
+**Рабочие файлы приложения** (cookies, logs, setup marker) хранятся в системной папке:
+- Windows: `%APPDATA%\.instrumentarium\`
+- Linux: `~/.instrumentarium/`
+- macOS: `~/Library/Application Support/.instrumentarium/`
+
+```
+<папка с .exe>/
+├── Instrumentarium.exe      # Исполняемый файл
+├── download.html            # UI (извлекается из _MEIPASS при запуске)
+├── .bin/                    # yt-dlp, ffmpeg (скачиваются при установке)
+└── assets/                  # Иконки
+
+%APPDATA%/.instrumentarium/   # Рабочие данные (скрытая папка)
+├── instrumentarium.log      # Лог
+├── .setup_done              # Маркёр настройки
+└── .cookies.txt             # Cookies (опционально)
+```
+
+**Ничего не пишется в Temp, AppData\Local, или куда-либо ещё.**
 
 ---
 
@@ -190,6 +208,9 @@ Cleanup Thread (daemon)
 - **Реальный прогресс-бар** — парсинг процента из yt-dlp output
 - **Popen с CREATE_NEW_PROCESS_GROUP** — для убийства дерева процессов на Windows
 - **taskkill /F /T** — убийство process tree на Windows
+- **Cookies persistence** — хранение в `%APPDATA%/.instrumentarium/cookies.txt`, восстановление при старте
+- **Tracked cancel cleanup** — при отмене удаляются только файлы, реально созданные yt-dlp (парсинг stdout)
+- **ThreadingLock для cookies** — `_cookies_lock` предотвращает race condition в ThreadingHTTPServer
 
 ---
 
@@ -200,17 +221,18 @@ Cleanup Thread (daemon)
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | `/`, `/index.html` | Отдаёт download.html |
-| GET | `/status` | JSON: setup_state |
+| GET | `/status` | JSON: setup_state + cookies_path + cookies_file_exists |
 | GET | `/probe?url=URL` | JSON: {title, duration, thumbnail, formats, audio_formats} |
 | GET | `/probe-meta?url=URL&format_id=ID&duration=N` | JSON: {job_id} |
 | GET | `/probe-meta-status?id=ID` | JSON: {status, filesize, probe_duration} |
+| GET | `/cookies?t=TIMESTAMP` | JSON: {ok, content, path} — текущие cookies (cache-bust) |
 | GET | `/log?job=ID&offset=N` | JSON: {lines, status, speed, filesize, downloaded_bytes, cancelled, stall_warning} |
 | GET | `/open-folder` | Открывает папку downloads |
 | GET | `/cancel` | Отмена активной загрузки (legacy) |
 | POST | `/cancel` | Отмена активной загрузки + очистка .part/.ytdl |
 | POST | `/setup` | Запускает setup wizard |
 | POST | `/download` | Запускает скачивание {url, mode, format_id} |
-| POST | `/cookies` | Сохранить/очистить cookies |
+| POST | `/cookies` | Сохранить/очистить cookies (POST с content=base64 для сохранения, пустой body для очистки) |
 | POST | `/shutdown` | Kill subprocess + stop server |
 
 ### 5.2. Формат /probe response
@@ -299,7 +321,7 @@ Cleanup Thread (daemon)
 - Успех: `#4caf50`
 - Ошибка: `#ff4757`
 
-### 6.4. Cookies Dialog
+### 6.4 Cookies Dialog
 
 **Назначение**: загрузка cookies для доступа к приватному контенту (LinkedIn и др.)
 
@@ -307,13 +329,18 @@ Cleanup Thread (daemon)
 - Drag & drop зона (или click → `<input type="file" accept=".txt">`)
 - Textarea для ручной вставки содержимого cookies.txt
 - ?-тултип рядом с «Как получить cookies.txt ?» — инструкция по экспорту из браузера
-- Кнопки: Отмена, Очистить, Сохранить
+- Кнопка «Очистить» (удаляет cookies с диска)
+- ✕ (крестик в правом верхнем углу) — сохраняет и закрывает диалог
 
 **Поведение**:
-- При сохранении: кнопка блокируется → «⏳ Сохраняю…» → «✅ Готово» → автозакрытие через 1.2с
-- При ошибке: разблокировка кнопки, красное сообщение об ошибке
-- Cookies сохраняются в `.cookies.txt` (_BASE_DIR), используются yt-dlp через `--cookies`
+- При открытии: GET `/cookies` → загрузка сохранённых cookies с диска
+- При сохранении (✕ с непустым textarea): POST `/cookies` → валидация формата Netscape → запись в системную папку → `state.cookies_path` обновляется
+- При очистке: POST `/cookies` с пустым body → удаление файла с диска → `state.cookies_path = None`
+- Cookies **сохраняются между перезапусками** программы (файл в системной папке)
 - Валидация: проверка формата Netscape cookie file, ограничение размера 1MB
+- Thread-safe: все операции защищены `_cookies_lock` (threading.Lock)
+
+**Хранение**: cookies хранятся в `.cookies.txt` внутри системной папки (`DATA_DIR`), используются yt-dlp через `--cookies`. Путь вычисляется через `_get_system_data_dir()`.
 
 **pywebview нюанс**: тултипы через JS `onmouseenter`/`onmouseleave` (CSS `:hover` не работает)
 
@@ -383,7 +410,7 @@ pyinstaller video-downloader.spec --clean
 **Триггеры:** push в main, тег v*, ручной запуск
 
 **Пайплайн:**
-1. **test** — pytest (57 тестов)
+1. **test** — pytest (58 тестов)
 2. **build** — PyInstaller для Linux/Windows/macOS
 3. **release** — GitHub Release (только для тегов v*)
 
@@ -424,6 +451,14 @@ pyinstaller video-downloader.spec --clean
 - ✅ Плавное исчезновение прогресс-бара после отмены
 - ✅ Debug-консоль (F12) для диагностики
 - ✅ Убийство process tree на Windows (taskkill /F /T /PID)
+- ✅ Cookies persistence в системной папке (сохраняются между перезапусками)
+- ✅ Безопасная очистка при отмене (только файлы созданные yt-dlp, не snapshot diff)
+- ✅ Восстановление cookies на уровне модуля (не только `__main__`)
+- ✅ Thread-safe cookies endpoint (`_cookies_lock`)
+- ✅ Cache-busting для GET `/cookies` (предотвращает кеширование браузером)
+
+**Известные проблемы:**
+- ⚠️ При быстром открытии/закрытии cookies dialog может не успеть отобразиться сохранённый контент (нужен новый билд с логированием для диагностики)
 
 **Текущая версия:** v0.1.0 (branch `v0.1.0`)
 
