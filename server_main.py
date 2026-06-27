@@ -697,22 +697,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             job["cancelled"] = True
             job["status"] = "error"
             job["log"].append("[cancelled] Download cancelled by user")
-            # Remove ALL files created during this job (snapshot diff)
-            files_before = job.get("_files_before", set())
-            out_dir = state.output_base
-            if out_dir and os.path.isdir(out_dir):
-                try:
-                    for f in os.listdir(out_dir):
-                        if f not in files_before:
-                            full = os.path.join(out_dir, f)
-                            try:
-                                if os.path.isfile(full) or os.path.islink(full):
-                                    os.remove(full)
-                                    log.info("/cancel: removed file %s", f)
-                            except OSError as e:
-                                log.warning("/cancel: failed to remove %s: %s", full, e)
-                except Exception:
-                    pass
+            # Remove only files created by this job (tracked via stdout parsing)
+            created_files = job.get("_created_files", set())
+            for fpath in created_files:
+                if fpath and os.path.exists(fpath):
+                    try:
+                        if os.path.isfile(fpath) or os.path.islink(fpath):
+                            os.remove(fpath)
+                            log.info("/cancel: removed file %s", fpath)
+                    except OSError as e:
+                        log.warning("/cancel: failed to remove %s: %s", fpath, e)
         # Also cancel any active probe-meta jobs
         for pjid, pjobj in list(probe_meta_jobs.items()):
             if pjobj.get("status") == "running":

@@ -182,14 +182,8 @@ class JobLogger(threading.Thread):
         j["log"].append(f"[yt-dlp] {self.yt}")
         j["log"].append(f"[cmd] {' '.join(cmd)}")
 
-        # Snapshot output dir before download — track all new files for cleanup
-        out_dir_files_before = set()
-        if out_dir and os.path.isdir(out_dir):
-            try:
-                out_dir_files_before = set(os.listdir(out_dir))
-            except OSError:
-                out_dir_files_before = set()
-        j["_files_before"] = out_dir_files_before
+        # Track all files created by yt-dlp for this job (for cancel cleanup)
+        j["_created_files"] = set()
 
         try:
             proc = _popen(cmd)
@@ -221,17 +215,22 @@ class JobLogger(threading.Thread):
                 last_progress_time = time.time()
                 j.pop("stall_warning", None)
 
+                # Track all file paths yt-dlp writes to (for cleanup on cancel)
                 if "[download] Destination:" in line:
                     filepath = line.split("Destination:", 1)[1].strip()
                     j["filepath"] = filepath
-                    # Track partial file path (yt-dlp writes to .part during download)
-                    j["_partial_filepath"] = filepath + ".part"
+                    j["_created_files"].add(filepath)
+                    j["_created_files"].add(filepath + ".part")
                 elif line.startswith("[Merger]") and "into" in line:
                     idx = line.rfind('"')
                     idx2 = line.rfind('"', 0, idx)
                     if idx > idx2:
                         filepath = line[idx2+1:idx]
+                    j["_created_files"].add(filepath)
                     j["log"].append("[info] Audio+Video merge ✓")
+                elif "[ExtractAudio]" in line and "Destination:" in line:
+                    ea_path = line.split("Destination:", 1)[1].strip()
+                    j["_created_files"].add(ea_path)
 
                 if "[download]" in line and " at " in line and "%" in line and " of " in line:
                     try:

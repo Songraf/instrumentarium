@@ -235,15 +235,15 @@ class TestCancelEndpoint(unittest.TestCase):
         from server_main import Handler
         source = inspect.getsource(Handler._handle_cancel)
         self.assertIn("job_id", source)
-        self.assertIn("_files_before", source)
+        self.assertIn("_created_files", source)
 
-    def test_cancel_removes_new_files(self):
-        """_handle_cancel removes all files created during job (snapshot diff)."""
+    def test_cancel_removes_created_files(self):
+        """_handle_cancel removes only files tracked in _created_files."""
         import inspect
         from server_main import Handler
         source = inspect.getsource(Handler._handle_cancel)
-        self.assertIn("_files_before", source)
-        self.assertIn("listdir", source)
+        self.assertIn("_created_files", source)
+        self.assertIn("os.remove", source)
 
     def test_cancel_cancels_probe_meta(self):
         """_handle_cancel cancels running probe-meta jobs."""
@@ -252,12 +252,12 @@ class TestCancelEndpoint(unittest.TestCase):
         source = inspect.getsource(Handler._handle_cancel)
         self.assertIn("probe_meta_jobs", source)
 
-    def test_download_jobs_track_files_before(self):
-        """Download jobs track _files_before for cleanup."""
+    def test_download_jobs_track_created_files(self):
+        """Download jobs track _created_files for cleanup."""
         import inspect
         from server.download import JobLogger
         source = inspect.getsource(JobLogger.run)
-        self.assertIn("_files_before", source)
+        self.assertIn("_created_files", source)
 
 
 class TestProbeMetaEstimatedFlag(unittest.TestCase):
